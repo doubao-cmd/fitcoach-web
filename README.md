@@ -1,84 +1,85 @@
-# 🏋️ FitCoach Web — 教练管理后台
+# 🏋️ FitCoach — AI+体感的宿舍健身私教系统（Web 教练后台）
 
-> FitCoach 教练端 | Next.js 14 + Tailwind CSS + ECharts
-> 和手机端 FitCoach（Expo）配套的 Web 管理平台
+> **在线体验**：<https://fitcoach-web-liart.vercel.app>
+>
+> 基于 **MediaPipe BlazePose 端侧姿态识别**的 AI 健身私教：浏览器本地推理 33 个人体关键点，实时完成深蹲 / 俯卧撑 / 平板支撑 / 开合跳的自动计数（或计时）、姿态偏差纠错与评分，视频数据不出本机。配套数据大屏、动作库、训练记录、学员管理、排行榜与训练周报。
 
-## 🖥️ 页面一览
+配套的手机端 App（Expo，含加速度计体感计次、7 天训练计划、徽章激励体系）见同项目 `FitCoach/` 目录。
 
-| 页面 | 路由 | 功能 |
+---
+
+## ✨ 功能特性
+
+### 🤖 AI 姿态识别（`/pose`）
+- **纯端侧推理**：MediaPipe BlazePose，流畅(6MB)/均衡(9MB)/精准(29MB) 三档模型可切，GPU/CPU 自适应，支持一键导出逐次数据 CSV
+- **4 个动作**：标准深蹲、俯卧撑、平板支撑、开合跳，动作要点与常见错误实时提示
+- **六道防抖状态机**：进入/完成时间窗确认、滞回复位、冷却、最低幅度门、丢骨架保护，解决"做一个计两个/卡复位"
+- **实时反馈**：画面骨架 + 关节角度标注、实时角度波形、FPS/推理耗时 HUD、文字 + 语音双通道纠错、训练总结报告
+- 平板支撑为独立计时检测器：塌腰/撅臀方向识别、断段保护、合格保持时长统计
+- 支持 URL 预选动作：`/pose?exercise=c3`
+
+### 📊 教练管理后台
+| 页面 | 路由 | 内容 |
 |------|------|------|
-| 📊 数据大屏 | `/` | 6 个统计卡片 + 30 天趋势折线图 + 周训练量 + 动作分布饼图 + Top10 排行榜 + 时段热力图 + 最新训练列表 |
-| 🏋️ 动作库 | `/courses` | 8 个标准动作卡片 + 难度筛选 + AI 识别要点 + 目标肌群 |
-| 📝 训练记录 | `/sessions` | 完整训练列表 + 展开查看每次训练的动作明细 + AI 问题反馈 |
-| 👥 学员管理 | `/students` | 全部学员表格 + 活跃/流失状态 + 点击进入个人详情 |
-| 👤 学员详情 | `/students/[id]` | 个人信息 + 评分进步趋势 + 历史训练 |
-| 🏆 排行榜 | `/leaderboard` | Top 3 奖牌突出展示 + 完整排行榜 |
+| 数据大屏 | `/` | KPI 环比卡 + 30 天趋势 + 动作标准度雷达 + 周目标三环 + 连续打卡榜 + 端侧引擎状态 + 实时动态流 + 时段热力图 |
+| AI 识别 | `/pose` | 姿态识别训练页（见上） |
+| 动作库 | `/courses` | 8 个标准动作、难度/肌群筛选搜索、动作详情弹层（要点/常见错误/呼吸节奏）、一键带参开练 |
+| 训练记录 | `/sessions` | 时间线分组、姓名/动作筛选、展开查看逐次标准度折线与 AI 问题标签 |
+| 学员管理 | `/students` | 学员表格、连续打卡、个人详情（PR 纪录、进步趋势、动作偏好、热力图、11 枚成就徽章） |
+| 排行榜 | `/leaderboard` | 领奖台 + 次数/时长/评分/打卡四维度排名 + 周变化 |
+| 训练周报 | `/report` | 周度 KPI、AI 点评、图表汇总，可打印 / 导出 PDF |
 
-## 🚀 快速开始
+手机端可导出训练 JSON，在大屏一键导入，数据即刻汇入全部统计模块。
+
+---
+
+## 🧱 技术栈
+
+- **Next.js 14**（App Router）· **React 18** · **TypeScript**
+- **Tailwind CSS 3**（极光/毛玻璃/点阵等自定义设计体系）
+- **ECharts**（按需动态加载）+ 自研 SVG 迷你折线/三环/雷达组件
+- **MediaPipe Tasks Vision**（`@mediapipe/tasks-vision`），模型与 WASM 全部本地托管于 `public/mediapipe/`
+- 纯前端、零后端依赖；Vercel 一键部署，推送 main 自动发布
+
+## 🚀 本地开发
 
 ```powershell
-# 1. 进入项目
-cd "C:\Users\cc\Desktop\FitCoach-Web"
-
-# 2. 安装依赖（只需跑一次）
 npm install
-
-# 3. 启动开发服务器
-npm run dev
+npm run dev      # http://localhost:3000
 ```
 
-浏览器打开 **http://localhost:3000**
+> 摄像头功能需要安全上下文：`localhost` 或 HTTPS 均可，建议使用 Chrome / Edge。
 
-## 📁 项目结构
+## ✅ 质量保障
 
-```
-FitCoach-Web/
-├── app/                           # Next.js App Router
-│   ├── layout.tsx                 # 根布局（Sidebar + 内容）
-│   ├── globals.css                # Tailwind 入口
-│   ├── page.tsx                   # 数据大屏 /
-│   ├── courses/page.tsx           # 动作库 /courses
-│   ├── sessions/page.tsx          # 训练记录 /sessions
-│   ├── students/
-│   │   ├── page.tsx               # 学员管理 /students
-│   │   └── [id]/page.tsx          # 学员详情 /students/:id
-│   └── leaderboard/page.tsx       # 排行榜 /leaderboard
-├── components/
-│   ├── Sidebar.tsx                # 侧边栏导航
-│   ├── StatCard.tsx               # 统计卡片
-│   └── charts/                    # ECharts 图表（ssr:false）
-│       ├── TrendLineChart.tsx     # 趋势折线图
-│       ├── WeeklyMinutesChart.tsx # 周训练量
-│       ├── ExercisePieChart.tsx   # 动作分布饼图
-│       ├── LeaderboardBarChart.tsx# 排行榜条形图
-│       └── HeatmapChart.tsx       # 时段热力图
-├── lib/
-│   └── mock.ts                    # Mock 数据（后续接真实 API）
-├── public/                        # 静态资源
-├── next.config.js
-├── tailwind.config.js
-├── postcss.config.js
-├── tsconfig.json
-└── package.json
+- 类型检查：`npx tsc --noEmit`
+- 姿态状态机回归测试（**32 个合成运动学场景，无第三方依赖**）：
+
+```powershell
+node pose-regression.mts
 ```
 
-## 📜 命令
+覆盖连续计数、单帧毛刺、快速连做、顶点余动、丢帧恢复、透视压缩、平板塌腰/撅臀/断段等边界场景。
 
-| 命令 | 说明 |
-|------|------|
-| `npm run dev` | 启动开发服务器 localhost:3000 |
-| `npm run build` | 构建生产版本 |
-| `npm start` | 运行生产版本 |
-| `npm run lint` | 代码检查 |
-
-## 🔌 后续接真实数据
-
-所有数据集中在 `lib/mock.ts`，后续接入数据库时：
+## 📁 目录结构
 
 ```
-FitCoach 手机 App  →  训练数据上传  →  Supabase / 自建后端  →  FitCoach-Web
+app/                    # App Router 路由页
+├── pose/page.tsx       # AI 识别页（检测器分派、HUD、波形、总结弹窗）
+├── report/page.tsx     # 训练周报
+└── ...
+components/             # UI 组件与 ECharts 封装（charts/）
+lib/
+├── pose/
+│   ├── geometry.ts     # 姿态算法：关键点数学 + RepCounter + PlankDetector
+│   ├── skeleton.ts     # 骨架连线定义
+│   └── oneEuro.ts      # One Euro 关键点滤波
+├── mock.ts             # 演示数据
+└── bridge.ts           # 手机端 JSON ↔ 后台数据模型转换层
+public/mediapipe/       # 三档 .task 模型 + WASM 运行时（本地托管）
+pose-regression.mts     # 算法回归测试
 ```
 
 ## 📄 License
 
-MIT
+MIT（大学生创新训练项目）
