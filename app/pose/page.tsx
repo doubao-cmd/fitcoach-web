@@ -702,6 +702,7 @@ export default function PosePage() {
   }, [running]);
 
   // ---------- URL 预选动作：/pose?exercise=c3&goal=30 ----------
+  const pendingWorkoutRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const q = new URLSearchParams(window.location.search);
@@ -709,8 +710,21 @@ export default function PosePage() {
     if (ex && POSE_EXERCISES.some((e) => e.id === ex) && ex !== exerciseId) {
       switchExercise(ex as PoseExerciseId);
     }
+    const w = q.get('workout');
+    if (w && WORKOUT_PLANS.some((p) => p.id === w)) pendingWorkoutRef.current = w;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 摄像头就绪后自动开启 URL 指定的跟练课程：/pose?workout=w1
+  useEffect(() => {
+    if (status === 'ready' && pendingWorkoutRef.current) {
+      const wid = pendingWorkoutRef.current;
+      pendingWorkoutRef.current = null;
+      const plan = WORKOUT_PLANS.find((p) => p.id === wid);
+      if (plan) beginWorkout(plan);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   // ---------- 交互 ----------
   const switchExercise = (id: PoseExerciseId) => {

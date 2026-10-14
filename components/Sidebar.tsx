@@ -5,7 +5,10 @@ import { usePathname } from 'next/navigation';
 const navItems = [
   { href: '/', label: '数据大屏', icon: '📊' },
   { href: '/pose', label: 'AI 识别', icon: '🤖' },
+  { href: '/plans', label: '训练计划', icon: '🗓️' },
   { href: '/courses', label: '动作库', icon: '🏋️' },
+  { href: '/knowledge', label: '健身知识', icon: '📚' },
+  { href: '/assessment', label: '体能自测', icon: '📐' },
   { href: '/sessions', label: '训练记录', icon: '📝' },
   { href: '/students', label: '学员管理', icon: '👥' },
   { href: '/leaderboard', label: '排行榜', icon: '🏆' },

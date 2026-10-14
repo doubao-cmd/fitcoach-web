@@ -6,7 +6,10 @@ import { usePathname } from 'next/navigation';
 const navItems = [
   { href: '/', label: '数据大屏', icon: '📊' },
   { href: '/pose', label: 'AI 识别', icon: '🤖' },
+  { href: '/plans', label: '计划', icon: '🗓️' },
   { href: '/courses', label: '动作库', icon: '🏋️' },
+  { href: '/knowledge', label: '知识', icon: '📚' },
+  { href: '/assessment', label: '自测', icon: '📐' },
   { href: '/sessions', label: '训练记录', icon: '📝' },
   { href: '/students', label: '学员', icon: '👥' },
   { href: '/leaderboard', label: '排行榜', icon: '🏆' },
