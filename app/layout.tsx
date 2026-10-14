@@ -4,6 +4,7 @@ import Sidebar from '@/components/Sidebar';
 import MobileNav from '@/components/MobileNav';
 import ScrollProgress from '@/components/ScrollProgress';
 import RegisterSW from '@/components/RegisterSW';
+import PwaPrompts from '@/components/PwaPrompts';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://fitcoach-web-liart.vercel.app'),
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
         </main>
         <RegisterSW />
+        <PwaPrompts />
       </body>
     </html>
   );

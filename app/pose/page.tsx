@@ -29,6 +29,8 @@ const MODEL_FILE: Record<ModelTier, string> = {
 };
 // 记忆用户选择的识别精度档位（答辩常用 heavy，下次进入自动恢复）
 const MODEL_TIER_KEY = 'fitcoach_model_tier_v1';
+const TIER_LABEL: Record<ModelTier, string> = { lite: '流畅', full: '均衡', heavy: '精准' };
+const MODEL_SIZE: Record<ModelTier, number> = { lite: 6, full: 9, heavy: 29 };
 function readSavedTier(): ModelTier {
   if (typeof window === 'undefined') return 'full';
   try {
@@ -37,6 +39,48 @@ function readSavedTier(): ModelTier {
   } catch {
     return 'full';
   }
+}
+
+// ---------- 离线模型缓存（由 Service Worker 写入 Cache Storage） ----------
+// 现代浏览器走 SIMD 版 WASM；与 FilesetResolver.forVisionTasks('/mediapipe/wasm') 实际加载一致
+const WASM_RUNTIME = ['/mediapipe/wasm/vision_wasm_internal.js', '/mediapipe/wasm/vision_wasm_internal.wasm'];
+async function cacheHasUrl(url: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !('caches' in window)) return false;
+  try {
+    const keys = await caches.keys();
+    for (const k of keys) {
+      const cache = await caches.open(k);
+      if (await cache.match(url)) return true;
+    }
+  } catch {}
+  return false;
+}
+// 流式下载并回报整体进度；响应经 Service Worker 时会被自动写入缓存
+async function prefetchFiles(urls: string[], onProgress: (frac: number, mb: number, totalMb: number) => void): Promise<void> {
+  let bytesTotal = 0;
+  let bytesDone = 0;
+  for (const url of urls) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`下载失败：${res.status}`);
+    const len = Number(res.headers.get('content-length') || 0);
+    bytesTotal += len;
+    if (!res.body) {
+      await res.arrayBuffer();
+      bytesDone += len;
+      onProgress(1, bytesDone / 1048576, bytesTotal / 1048576);
+      continue;
+    }
+    const reader = res.body.getReader();
+    let fileDone = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      fileDone += value.byteLength;
+      onProgress(bytesTotal ? (bytesDone + fileDone) / bytesTotal : 0, (bytesDone + fileDone) / 1048576, bytesTotal / 1048576);
+    }
+    bytesDone += len || fileDone;
+  }
+  onProgress(1, bytesDone / 1048576, bytesTotal / 1048576);
 }
 
 type AppStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -680,8 +724,7 @@ export default function PosePage() {
   const createLandmarker = useCallback(async (tier: ModelTier) => {
     const vision = await import('@mediapipe/tasks-vision');
     const fileset = await vision.FilesetResolver.forVisionTasks('/mediapipe/wasm');
-    const modelSize = { lite: 6, full: 9, heavy: 29 }[tier];
-    setLoadingText(`正在加载 ${tier === 'lite' ? '流畅' : tier === 'heavy' ? '精准' : '均衡'} 模型（约 ${modelSize}MB，本地托管）…`);
+    setLoadingText(`正在加载 ${TIER_LABEL[tier]} 模型（约 ${MODEL_SIZE[tier]}MB，本地托管）…`);
     const options = {
       baseOptions: {
         modelAssetPath: MODEL_FILE[tier],
@@ -719,7 +762,7 @@ export default function PosePage() {
       try { window.localStorage.setItem(MODEL_TIER_KEY, tier); } catch {}
       smootherRef.current.reset();
       try { old?.close(); } catch {}
-      setFeedback({ text: `已切换为${tier === 'lite' ? '流畅' : tier === 'heavy' ? '精准' : '均衡'}模式`, level: 'info' });
+      setFeedback({ text: `已切换为${TIER_LABEL[tier]}模式`, level: 'info' });
       const vision = await import('@mediapipe/tasks-vision');
       poseClassRef.current = vision.PoseLandmarker;
     } catch (err) {
@@ -728,6 +771,46 @@ export default function PosePage() {
       setSwitchingModel(false);
     }
   }, [createLandmarker, switchingModel]);
+
+  // ---------- 离线模型缓存状态与预下载 ----------
+  const [offlineReady, setOfflineReady] = useState({ wasm: false, model: false });
+  const [dlProgress, setDlProgress] = useState<number | null>(null);
+  const [dlMeta, setDlMeta] = useState({ mb: 0, totalMb: 0 });
+  const refreshOffline = useCallback(async () => {
+    const [wasmAll, modelHit] = await Promise.all([
+      Promise.all(WASM_RUNTIME.map((u) => cacheHasUrl(u))).then((rs) => rs.every(Boolean)),
+      cacheHasUrl(MODEL_FILE[modelTierRef.current]),
+    ]);
+    setOfflineReady({ wasm: wasmAll, model: modelHit });
+  }, []);
+  useEffect(() => {
+    refreshOffline();
+  }, [refreshOffline, modelTier]);
+
+  const prefetchOffline = useCallback(async () => {
+    if (dlProgress !== null) return;
+    const targets = [
+      ...(offlineReady.wasm ? [] : WASM_RUNTIME),
+      ...(offlineReady.model ? [] : [MODEL_FILE[modelTierRef.current]]),
+    ];
+    if (targets.length === 0) return;
+    setDlProgress(0);
+    setDlMeta({ mb: 0, totalMb: 0 });
+    try {
+      await prefetchFiles(targets, (frac, mb, totalMb) => {
+        setDlProgress(frac);
+        setDlMeta({ mb, totalMb });
+      });
+      // 等 Service Worker 完成 cache 写入后再刷新状态
+      await new Promise((r) => setTimeout(r, 400));
+      setFeedback({ text: '离线模型已预下载，断网也能开练', level: 'info' });
+    } catch (err) {
+      setFeedback({ text: `预下载失败：${err instanceof Error ? err.message : String(err)}`, level: 'warn' });
+    } finally {
+      setDlProgress(null);
+      refreshOffline();
+    }
+  }, [dlProgress, offlineReady, refreshOffline]);
 
   // ---------- 开启/重开摄像头（模型只加载一次，重试时复用） ----------
   const startCamera = useCallback(async () => {
@@ -1241,7 +1324,7 @@ export default function PosePage() {
                 <div className="absolute top-4 left-4 z-10 glass-dark rounded-lg px-2.5 py-1.5 text-white text-[10px] leading-4 font-mono">
                   <div className="flex items-center gap-1.5">
                     <span className={`w-1.5 h-1.5 rounded-full ${hud.fps >= 24 ? 'bg-emerald-400' : hud.fps >= 15 ? 'bg-amber-400' : 'bg-red-400'}`} />
-                    <span className="font-bold">{modelTier === 'lite' ? '流畅' : modelTier === 'heavy' ? '精准' : '均衡'}模型</span>
+                    <span className="font-bold">{TIER_LABEL[modelTier]}模型</span>
                   </div>
                   <div className="text-slate-300">{hud.fps} FPS · {hud.inferMs}ms/帧 · 33点</div>
                 </div>
@@ -1494,6 +1577,44 @@ export default function PosePage() {
                   <span className={`block text-[10px] ${modelTier === m.id ? 'text-violet-100' : 'text-gray-400'}`}>{m.sub}</span>
                 </button>
               ))}
+            </div>
+
+            {/* 离线模型预下载：答辩场地网络不稳时提前缓存，断网仍可识别 */}
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-bold text-gray-600">📦 离线可用</span>
+                <span className="text-[10px] text-gray-400">
+                  内核 {offlineReady.wasm ? '✓' : '—'} · 当前档位 {offlineReady.model ? '✓' : '—'}
+                </span>
+              </div>
+              {offlineReady.wasm && offlineReady.model ? (
+                <p className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2">
+                  ✓「{TIER_LABEL[modelTier]}」档已离线缓存，断网也能开练
+                </p>
+              ) : dlProgress !== null ? (
+                <div>
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 mb-1">
+                    <span className="font-semibold text-violet-600">正在预下载离线模型…</span>
+                    <span>
+                      {dlMeta.mb.toFixed(1)}/{dlMeta.totalMb.toFixed(0)}MB · {Math.round(dlProgress * 100)}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-violet-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all duration-200"
+                      style={{ width: `${Math.round(dlProgress * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={prefetchOffline}
+                  disabled={status === 'loading'}
+                  className="w-full py-2 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold transition-colors active:scale-[0.98] disabled:opacity-50"
+                >
+                  ⬇ 预下载「{TIER_LABEL[modelTier]}」离线包（约 {MODEL_SIZE[modelTier] + (offlineReady.wasm ? 0 : 13)}MB）
+                </button>
+              )}
             </div>
           </div>
 

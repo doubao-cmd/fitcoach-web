@@ -11,12 +11,16 @@ const RUNTIME_CACHE = `${VERSION}-runtime`;
 const PRECACHE_URLS = ['/', '/offline.html'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting()),
-  );
+  // 仅预缓存，不自动 skipWaiting：
+  // 首次安装由注册脚本发 SKIP_WAITING 立即激活；升级时停在 waiting，等用户在提示条里确认
+  event.waitUntil(caches.open(STATIC_CACHE).then((cache) => cache.addAll(PRECACHE_URLS)));
+});
+
+// 页面发现 waiting 中的新版本后，可 postMessage({ type: 'SKIP_WAITING' }) 立即激活
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING' || event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
