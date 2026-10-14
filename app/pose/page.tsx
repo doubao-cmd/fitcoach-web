@@ -27,6 +27,17 @@ const MODEL_FILE: Record<ModelTier, string> = {
   full: '/mediapipe/models/pose_landmarker_full.task',
   heavy: '/mediapipe/models/pose_landmarker_heavy.task',
 };
+// 记忆用户选择的识别精度档位（答辩常用 heavy，下次进入自动恢复）
+const MODEL_TIER_KEY = 'fitcoach_model_tier_v1';
+function readSavedTier(): ModelTier {
+  if (typeof window === 'undefined') return 'full';
+  try {
+    const v = window.localStorage.getItem(MODEL_TIER_KEY);
+    return v === 'lite' || v === 'full' || v === 'heavy' ? v : 'full';
+  } catch {
+    return 'full';
+  }
+}
 
 type AppStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -170,7 +181,7 @@ export default function PosePage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkerRef = useRef<PoseLandmarkerType | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const modelTierRef = useRef<ModelTier>('full');
+  const modelTierRef = useRef<ModelTier>(readSavedTier());
   const smootherRef = useRef<LandmarkSmoother>(new LandmarkSmoother(33, 0.9, 0.03));
   const rafRef = useRef<number>(0);
   const lastVideoTimeRef = useRef(-1);
@@ -695,7 +706,7 @@ export default function PosePage() {
 
   // ---------- 切换模型档位（摄像头保持开启） ----------
   const [switchingModel, setSwitchingModel] = useState(false);
-  const [modelTier, setModelTier] = useState<ModelTier>('full');
+  const [modelTier, setModelTier] = useState<ModelTier>(readSavedTier);
   const switchModelTier = useCallback(async (tier: ModelTier) => {
     if (tier === modelTierRef.current || switchingModel) return;
     setSwitchingModel(true);
@@ -705,6 +716,7 @@ export default function PosePage() {
       landmarkerRef.current = next;
       modelTierRef.current = tier;
       setModelTier(tier);
+      try { window.localStorage.setItem(MODEL_TIER_KEY, tier); } catch {}
       smootherRef.current.reset();
       try { old?.close(); } catch {}
       setFeedback({ text: `已切换为${tier === 'lite' ? '流畅' : tier === 'heavy' ? '精准' : '均衡'}模式`, level: 'info' });
@@ -724,7 +736,7 @@ export default function PosePage() {
     const hadModel = !!landmarkerRef.current;
     let landmarker: PoseLandmarkerType | null = null;
     try {
-      // 1. 模型（默认均衡档 full，精度比 lite 高、抖动更小）
+      // 1. 模型（档位取上次选择，无记忆时默认均衡档 full）
       if (!landmarkerRef.current) {
         landmarker = await createLandmarker(modelTierRef.current);
         landmarkerRef.current = landmarker;
