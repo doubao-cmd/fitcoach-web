@@ -18,6 +18,7 @@ import { LandmarkSmoother } from '@/lib/pose/oneEuro';
 import { loadImportedData, saveImportedData } from '@/lib/bridge';
 import { courses } from '@/lib/mock';
 import { recordWorkout, getStreak, getWeekDots, getDay, dateKey } from '@/lib/checkin';
+import { WORKOUT_PLANS, type WorkoutPlan } from '@/lib/workouts';
 import PoseGuide from '@/components/PoseGuide';
 
 type ModelTier = 'lite' | 'full' | 'heavy';
@@ -161,6 +162,17 @@ export default function PosePage() {
   // 训练前倒计时
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ---------- 跟练课程编排 ----------
+  type StageResult = { name: string; emoji: string; value: number; unit: string; avg: number };
+  const workoutRef = useRef<{ plan: WorkoutPlan; index: number } | null>(null);
+  const stageResultsRef = useRef<StageResult[]>([]);
+  // 阶段完成回调（用 ref 供检测循环调用，避免闭包陈旧）
+  const stageCompleteRef = useRef<() => void>(() => {});
+  const restTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [workoutStage, setWorkoutStage] = useState<{ plan: WorkoutPlan; index: number } | null>(null);
+  const [restLeft, setRestLeft] = useState<number | null>(null);
+  const [workoutSummary, setWorkoutSummary] = useState<null | { planId: string; planName: string; results: StageResult[]; totalMin: number }>(null);
   // 语音开关
   const [soundOn, setSoundOn] = useState(true);
   const soundOnRef = useRef(true);
@@ -415,13 +427,17 @@ export default function PosePage() {
       setPlank(pu);
       setLiveMetrics(pu.metrics);
     }
-    // 按秒达标自动暂停
+    // 按秒达标：课程流转或自由训练暂停
     if (goalRef.current > 0 && pu.totalGoodMs >= goalRef.current * 1000 && !plankGoalHitRef.current) {
       plankGoalHitRef.current = true;
-      runningRef.current = false;
-      setRunning(false);
-      setGoalDone(true);
-      speak('目标达成，太棒了');
+      if (workoutRef.current) {
+        stageCompleteRef.current();
+      } else {
+        runningRef.current = false;
+        setRunning(false);
+        setGoalDone(true);
+        speak('目标达成，太棒了');
+      }
     }
   }, [speak]);
 
@@ -505,12 +521,16 @@ export default function PosePage() {
               };
               repLogRef.current = [...repLogRef.current, item];
               setRepLog(repLogRef.current);
-              // 达标自动暂停
+              // 达标：跟练课程自动进入休息/下一阶段；自由训练则暂停
               if (goalRef.current > 0 && n >= goalRef.current) {
-                runningRef.current = false;
-                setRunning(false);
-                setGoalDone(true);
-                speak('目标达成，太棒了');
+                if (workoutRef.current) {
+                  stageCompleteRef.current();
+                } else {
+                  runningRef.current = false;
+                  setRunning(false);
+                  setGoalDone(true);
+                  speak('目标达成，太棒了');
+                }
               }
             } else if (now > holdUntilRef.current) {
               // 完成提示展示期间不刷过程文字，避免"站起来马上说蹲得不够低"
@@ -668,6 +688,7 @@ export default function PosePage() {
       cancelAnimationFrame(rafRef.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (restTimerRef.current) clearInterval(restTimerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       landmarkerRef.current?.close();
     };
@@ -813,6 +834,118 @@ export default function PosePage() {
     lastPlankSpeakRef.current = { text: '', at: 0 };
     waveRef.current = [];
     setFeedback({ text: exById(exerciseId).hint, level: 'info' });
+  };
+
+  // ---------- 跟练课程编排 ----------
+  const clearRestTimer = () => {
+    if (restTimerRef.current) { clearInterval(restTimerRef.current); restTimerRef.current = null; }
+  };
+
+  const applyStage = (i: number, autostart: boolean) => {
+    const w = workoutRef.current;
+    if (!w) return;
+    const st = w.plan.stages[i];
+    w.index = i;
+    switchExercise(st.exerciseId);
+    goalRef.current = st.goal;
+    setGoal(st.goal);
+    setWorkoutStage({ plan: w.plan, index: i });
+    setRestLeft(null);
+    if (autostart) {
+      // 后续阶段不再走 3-2-1，短暂停顿后直接开始
+      setTimeout(() => {
+        if (workoutRef.current) {
+          actuallyStart();
+          speak(`下一个，${exById(st.exerciseId).name}`);
+        }
+      }, 400);
+    }
+  };
+
+  const completeStage = () => {
+    const w = workoutRef.current;
+    if (!w) return;
+    const st = w.plan.stages[w.index];
+    const isPlank = st.exerciseId === 'c3';
+    const value = isPlank ? Math.round(plankRef.current.getTotalGoodMs() / 1000) : repsRef.current;
+    const scoreArr = isPlank ? plankSegScoresRef.current : repLogRef.current.map((r) => r.score);
+    const avg = scoreArr.length ? Math.round(scoreArr.reduce((a, b) => a + b, 0) / scoreArr.length) : 0;
+    const ex = exById(st.exerciseId);
+    stageResultsRef.current.push({ name: ex.name, emoji: ex.emoji, value, unit: isPlank ? '秒' : '个', avg });
+    runningRef.current = false;
+    setRunning(false);
+    setGoalDone(false);
+
+    const next = w.index + 1;
+    if (next >= w.plan.stages.length) {
+      // 整套完成
+      const results = [...stageResultsRef.current];
+      const totalMin = Math.max(1, Math.round(elapsed / 60));
+      const repsTotal = results.filter((r) => r.unit === '个').reduce((s, r) => s + r.value, 0);
+      const secTotal = results.filter((r) => r.unit === '秒').reduce((s, r) => s + r.value, 0);
+      recordWorkout({ reps: repsTotal, seconds: secTotal, minutes: totalMin });
+      setCheckinTick((t) => t + 1);
+      setWorkoutSummary({ planId: w.plan.id, planName: w.plan.name, results, totalMin });
+      clearRestTimer();
+      workoutRef.current = null;
+      setWorkoutStage(null);
+      setRestLeft(null);
+      speak('课程全部完成，太棒了');
+      return;
+    }
+
+    const restSec = st.restAfter ?? 0;
+    if (restSec > 0) {
+      speak(`休息${restSec}秒`);
+      let left = restSec;
+      setRestLeft(left);
+      clearRestTimer();
+      restTimerRef.current = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearRestTimer();
+          setRestLeft(null);
+          applyStage(next, true);
+        } else {
+          setRestLeft(left);
+          if (left <= 3) speak(String(left));
+        }
+      }, 1000);
+    } else {
+      applyStage(next, true);
+    }
+  };
+  // 每次渲染刷新为最新闭包（检测循环通过 ref 调用，避免陈旧状态）
+  stageCompleteRef.current = completeStage;
+
+  const beginWorkout = (plan: WorkoutPlan) => {
+    if (status !== 'ready') return;
+    clearRestTimer();
+    stageResultsRef.current = [];
+    setWorkoutSummary(null);
+    setElapsed(0);
+    workoutRef.current = { plan, index: 0 };
+    applyStage(0, false);
+    // 首阶段走 3-2-1 倒计时
+    setTimeout(() => handleStartPause(), 0);
+  };
+
+  const skipRest = () => {
+    const w = workoutRef.current;
+    if (!w || restLeft === null) return;
+    clearRestTimer();
+    setRestLeft(null);
+    applyStage(w.index + 1, true);
+  };
+
+  const exitWorkout = () => {
+    clearRestTimer();
+    runningRef.current = false;
+    setRunning(false);
+    workoutRef.current = null;
+    setWorkoutStage(null);
+    setRestLeft(null);
+    resetSession();
   };
 
   // 完成并写入后台数据（与手机端导出 JSON 同一套格式）
@@ -1021,6 +1154,33 @@ export default function PosePage() {
                 </div>
               )}
 
+              {/* 跟练课程：阶段进度条 */}
+              {status === 'ready' && workoutStage && (
+                <div className="absolute top-16 left-1/2 -translate-x-1/2 glass-dark rounded-full px-4 py-1.5 text-white text-xs font-bold whitespace-nowrap flex items-center gap-2">
+                  <span>{workoutStage.plan.emoji} {workoutStage.plan.name}</span>
+                  <span className="text-slate-300">第 {workoutStage.index + 1}/{workoutStage.plan.stages.length} 组</span>
+                  <span className="text-emerald-300">{exById(workoutStage.plan.stages[workoutStage.index].exerciseId).name}</span>
+                </div>
+              )}
+
+              {/* 跟练课程：组间休息遮罩 */}
+              {status === 'ready' && restLeft !== null && workoutStage && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55">
+                  <div className="bg-slate-900/90 rounded-3xl px-10 py-8 text-center text-white shadow-2xl">
+                    <p className="text-sm text-slate-300 font-semibold">组间休息</p>
+                    <p className="text-7xl font-black tabular-nums my-2">{restLeft}</p>
+                    <p className="text-sm mb-5">
+                      下一个：{exById(workoutStage.plan.stages[workoutStage.index + 1]?.exerciseId ?? 'c1').emoji}{' '}
+                      {exById(workoutStage.plan.stages[workoutStage.index + 1]?.exerciseId ?? 'c1').name}
+                    </p>
+                    <div className="flex gap-3 justify-center">
+                      <button onClick={skipRest} className="px-5 py-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-sm font-bold active:scale-95">跳过休息</button>
+                      <button onClick={exitWorkout} className="px-5 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold active:scale-95">退出课程</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 计次 / 计时 / 目标 */}
               {status === 'ready' && (
                 <div className="absolute bottom-4 left-4 glass-dark rounded-xl px-4 py-2 text-white min-w-[110px]">
@@ -1140,14 +1300,74 @@ export default function PosePage() {
             </div>
           </div>
 
+          {/* 跟练课程 */}
+          <div className="bg-white rounded-2xl shadow-sm p-5 card-hover">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-sm font-bold text-gray-800">🎯 跟练课程</h2>
+              <span className="text-[11px] text-gray-400">自动切换 · 组间休息</span>
+            </div>
+            {!workoutStage ? (
+              <>
+                <p className="text-[11px] text-gray-400 mb-3">{status === 'ready' ? '选一套课程，跟着节奏练完全程' : '开启摄像头后即可开始课程'}</p>
+                <div className="space-y-2">
+                  {WORKOUT_PLANS.map((p) => (
+                    <button
+                      key={p.id}
+                      disabled={status !== 'ready'}
+                      onClick={() => beginWorkout(p)}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left bg-gradient-to-r from-orange-50 to-amber-50 ring-1 ring-orange-100 hover:ring-orange-300 transition-all active:scale-[0.98] disabled:opacity-50"
+                    >
+                      <span className="text-2xl">{p.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-800">{p.name}</p>
+                        <p className="text-[11px] text-gray-500 truncate">{p.desc}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="block text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-bold">{p.level}</span>
+                        <span className="block text-[10px] text-gray-400 mt-1">{p.stages.length} 组 · {p.estMinutes}分</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-bold text-gray-800">{workoutStage.plan.emoji} {workoutStage.plan.name}</p>
+                  <button onClick={exitWorkout} className="text-[11px] text-red-500 font-semibold hover:underline">退出课程</button>
+                </div>
+                <ol className="space-y-1.5">
+                  {workoutStage.plan.stages.map((s, i) => {
+                    const ex = exById(s.exerciseId);
+                    const done = i < workoutStage.index;
+                    const cur = i === workoutStage.index;
+                    return (
+                      <li key={i} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
+                        cur ? 'bg-blue-600 text-white font-bold' : done ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'
+                      }`}>
+                        <span className="w-4 text-center">{done ? '✓' : i + 1}</span>
+                        <span className="flex-1">{ex.emoji} {ex.name}</span>
+                        <span className={cur ? 'text-blue-100' : 'text-gray-400'}>{s.goal}{s.exerciseId === 'c3' ? '秒' : '个'}</span>
+                        {i < workoutStage.plan.stages.length - 1 && <span className={cur ? 'text-blue-100' : 'text-gray-300'}>·休{s.restAfter}s</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+                {restLeft === null && (
+                  <p className="text-[11px] text-gray-400 mt-2 text-center">完成当前目标自动进入下一动作</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* 动作选择 */}
           <div className="bg-white rounded-2xl shadow-sm p-5 card-hover">
-            <h2 className="text-sm font-bold text-gray-800 mb-3">选择训练动作</h2>
+            <h2 className="text-sm font-bold text-gray-800 mb-3">选择训练动作{workoutStage && <span className="text-[11px] text-orange-500 font-normal ml-2">课程进行中已锁定</span>}</h2>
             <div className="space-y-2">
               {POSE_EXERCISES.map((ex) => (
                 <button
                   key={ex.id}
-                  disabled={status !== 'ready' || running}
+                  disabled={status !== 'ready' || running || !!workoutStage}
                   onClick={() => switchExercise(ex.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all active:scale-[0.98] disabled:opacity-50 ${
                     exerciseId === ex.id
@@ -1215,7 +1435,7 @@ export default function PosePage() {
                 {(isPlank ? [20, 30, 45, 60, 0] : [5, 10, 15, 20, 0]).map((g) => (
                   <button
                     key={g}
-                    disabled={running}
+                    disabled={running || !!workoutStage}
                     onClick={() => changeGoal(g)}
                     className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 ${
                       goal === g
@@ -1287,6 +1507,31 @@ export default function PosePage() {
 
             {status === 'ready' && (
               <div className="space-y-2">
+                {workoutStage ? (
+                  <>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleStartPause}
+                        disabled={restLeft !== null}
+                        className="flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 disabled:opacity-50 bg-amber-500 hover:bg-amber-600"
+                      >
+                        {running ? '⏸ 暂停课程' : restLeft !== null ? '组间休息中…' : '▶ 继续'}
+                      </button>
+                      <button
+                        onClick={exitWorkout}
+                        className="px-4 py-3 rounded-xl font-bold text-white bg-slate-800 hover:bg-slate-900 transition-all active:scale-95"
+                      >
+                        退出
+                      </button>
+                    </div>
+                    {restLeft !== null && (
+                      <button onClick={skipRest} className="w-full py-2 text-xs font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors">
+                        ⏭ 跳过休息，立即开始下一动作
+                      </button>
+                    )}
+                  </>
+                ) : (
+                <>
                 <div className="flex gap-2">
                   <button
                     onClick={handleStartPause}
@@ -1326,6 +1571,8 @@ export default function PosePage() {
                   >
                     📊 去数据大屏查看本次记录 →
                   </Link>
+                )}
+                </>
                 )}
               </div>
             )}
@@ -1457,6 +1704,57 @@ export default function PosePage() {
                   onClick={() => setSummary(null)}
                   className="px-4 py-2.5 rounded-xl text-sm font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors"
                 >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 跟练课程整套总结弹窗 ===== */}
+      {workoutSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4" onClick={() => setWorkoutSummary(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-up" onClick={(e) => e.stopPropagation()}>
+            <div className="aurora px-6 py-7 text-center text-white">
+              <p className="text-5xl mb-2 relative z-10">🏆</p>
+              <h2 className="text-xl font-black relative z-10">课程完成！</h2>
+              <p className="text-xs text-blue-100 mt-1 relative z-10">{workoutSummary.planName} · {workoutSummary.totalMin} 分钟 · 已打卡</p>
+            </div>
+            <div className="p-6">
+              <div className="space-y-2 mb-5">
+                {workoutSummary.results.map((r, i) => (
+                  <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-2.5">
+                    <span className="text-lg">{r.emoji}</span>
+                    <span className="flex-1 text-sm font-semibold text-gray-700">{r.name}</span>
+                    <span className="text-sm font-black text-blue-600 tabular-nums">{r.value}<span className="text-[10px] text-gray-400 ml-0.5">{r.unit}</span></span>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${r.avg >= 85 ? 'bg-emerald-100 text-emerald-700' : r.avg >= 70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                      {r.avg || '--'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-center text-[11px] text-gray-400 mb-4">
+                {(() => {
+                  const a = workoutSummary.results.reduce((s, r) => s + r.avg, 0) / Math.max(1, workoutSummary.results.length);
+                  return a >= 90 ? '🏅 整套动作都很标准，状态出色！' : a >= 75 ? '💪 完成得不错，注意 AI 提示的细节' : '🌱 下次放慢节奏，把每个动作做标准';
+                })()}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const p = WORKOUT_PLANS.find((x) => x.id === workoutSummary.planId);
+                    setWorkoutSummary(null);
+                    if (p) resetSession(), beginWorkout(p);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors"
+                >
+                  🔁 再练一次
+                </button>
+                <Link href="/" className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white text-center bg-slate-800 hover:bg-slate-900 transition-colors">
+                  📊 查看数据
+                </Link>
+                <button onClick={() => { resetSession(); setWorkoutSummary(null); }} className="px-4 py-2.5 rounded-xl text-sm font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors">
                   关闭
                 </button>
               </div>
