@@ -11,6 +11,7 @@ import HeatmapChart from '@/components/charts/HeatmapChart';
 import TrendLineChart from '@/components/charts/TrendLineChart';
 import AccuracyRadarChart from '@/components/charts/AccuracyRadarChart';
 import GoalsRings from '@/components/GoalsRings';
+import CheckinCalendar from '@/components/CheckinCalendar';
 import { getActiveData, parseMobileJson, saveImportedData, clearImportedData, loadImportedData } from '@/lib/bridge';
 
 const feedDot: Record<string, string> = {
@@ -231,13 +232,18 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* ===== Bento 第四行：周训练量 + 热力图 ===== */}
+      {/* ===== Bento 第四行：周训练量 + 热力图 + 打卡日历 ===== */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card title="本周每日训练量" icon="📊">
           <WeeklyMinutesChart data={data.weeklyMinutesData} />
         </Card>
-        <Card title="训练时段分布热力图" icon="🕐" className="lg:col-span-2">
+        <Card title="训练时段分布热力图" icon="🕐">
           <HeatmapChart data={data.heatmapData} />
+        </Card>
+        <Card title="每日打卡" icon="🔥" sub="完成保存即打卡">
+          <div className="h-full flex items-center">
+            <CheckinCalendar />
+          </div>
         </Card>
       </div>
 

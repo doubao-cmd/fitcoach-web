@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { PoseLandmarker as PoseLandmarkerType, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import {
@@ -17,6 +17,8 @@ import { BODY_CONNECTIONS, BODY_LANDMARK_INDICES, VISIBILITY_MIN } from '@/lib/p
 import { LandmarkSmoother } from '@/lib/pose/oneEuro';
 import { loadImportedData, saveImportedData } from '@/lib/bridge';
 import { courses } from '@/lib/mock';
+import { recordWorkout, getStreak, getWeekDots, getDay, dateKey } from '@/lib/checkin';
+import PoseGuide from '@/components/PoseGuide';
 
 type ModelTier = 'lite' | 'full' | 'heavy';
 const MODEL_FILE: Record<ModelTier, string> = {
@@ -134,6 +136,16 @@ export default function PosePage() {
   const [summary, setSummary] = useState<null | {
     count: number; unit: string; duration: number; avg: number; scores: number[];
   }>(null);
+  // 打卡刷新刻度
+  const [checkinTick, setCheckinTick] = useState(0);
+  const checkin = useMemo(() => {
+    void checkinTick;
+    return {
+      streak: getStreak(),
+      week: getWeekDots(),
+      today: getDay(dateKey()),
+    };
+  }, [checkinTick]);
   // 训练前倒计时
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -789,6 +801,8 @@ export default function PosePage() {
         sessions: [],
       };
       saveImportedData({ ...exp, sessions: [session, ...(exp.sessions ?? [])] });
+      recordWorkout({ seconds: goodSec, minutes: Math.round(elapsed / 60) });
+      setCheckinTick((t) => t + 1);
       setSaved(true);
       setSummary({ count: goodSec, unit: '秒', duration: elapsed, avg: avgAccuracy, scores: plankSegScoresRef.current });
       setFeedback({ text: `✅ 已保存！累计保持 ${goodSec} 秒，平均标准度 ${avgAccuracy}%`, level: 'good' });
@@ -823,6 +837,8 @@ export default function PosePage() {
       sessions: [],
     };
     saveImportedData({ ...exp, sessions: [session, ...(exp.sessions ?? [])] });
+    recordWorkout({ reps, minutes: Math.round(elapsed / 60) });
+    setCheckinTick((t) => t + 1);
     setSaved(true);
     setSummary({ count: reps, unit: '个', duration: elapsed, avg: avgAccuracy, scores });
     setFeedback({ text: `✅ 已保存！平均标准度 ${avgAccuracy}%`, level: 'good' });
@@ -1121,6 +1137,9 @@ export default function PosePage() {
             </div>
           )}
 
+          {/* 动作骨架示范 */}
+          <PoseGuide exerciseId={exerciseId} />
+
           {/* 目标 + 数据卡 */}
           <div className="bg-white rounded-2xl shadow-sm p-5 card-hover">
             {/* 目标选择：计次动作为「个」，平板支撑为「秒」 */}
@@ -1253,6 +1272,35 @@ export default function PosePage() {
                     📊 去数据大屏查看本次记录 →
                   </Link>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* 今日打卡 / 周期目标 */}
+          <div className="bg-white rounded-2xl shadow-sm p-5 card-hover">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold text-gray-800">🔥 每日打卡</h2>
+              <span className={`text-xs font-bold ${checkin.streak > 0 ? 'text-orange-500' : 'text-gray-300'}`}>
+                连续 {checkin.streak} 天
+              </span>
+            </div>
+            <div className="flex items-center justify-between mb-3">
+              {['一', '二', '三', '四', '五', '六', '日'].map((w, i) => (
+                <div key={i} className="flex flex-col items-center gap-1">
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    checkin.week[i] ? 'bg-gradient-to-br from-orange-400 to-red-400 text-white' : 'bg-gray-100 text-gray-400'
+                  }`}>{w}</span>
+                </div>
+              ))}
+            </div>
+            {checkin.today ? (
+              <div className="rounded-xl bg-emerald-50 text-emerald-700 text-xs font-semibold px-3 py-2.5 flex items-center justify-between">
+                <span>✅ 今日已打卡</span>
+                <span>{checkin.today.sessions} 组 · {checkin.today.minutes} 分钟{checkin.today.reps > 0 ? ` · ${checkin.today.reps} 个` : ''}{checkin.today.seconds > 0 ? ` · ${checkin.today.seconds} 秒平板` : ''}</span>
+              </div>
+            ) : (
+              <div className="rounded-xl bg-gray-50 text-gray-400 text-xs px-3 py-2.5 text-center">
+                完成一次训练并点「✓ 完成并保存」即打卡
               </div>
             )}
           </div>
