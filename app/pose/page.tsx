@@ -30,6 +30,84 @@ const MODEL_FILE: Record<ModelTier, string> = {
 
 type AppStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+// ---------- 站位自检向导（纯函数） ----------
+type GuideCheck = { key: string; label: string; ok: boolean; soft?: boolean; detail: string };
+const SIDE_VIEW_EXERCISES: PoseExerciseId[] = ['c2', 'c3', 'c4'];
+
+function buildGuideChecks(lm: NormalizedLandmark[] | undefined, luma: number, exId: PoseExerciseId): GuideCheck[] {
+  const inB = (p: NormalizedLandmark | undefined) => !!p && (p.visibility ?? 1) > 0.45 && p.x > 0.02 && p.x < 0.98 && p.y > 0.02 && p.y < 0.99;
+  const core = [11, 12, 23, 24, 25, 26, 27, 28];
+  const coreOk = !!lm && core.every((i) => inB(lm[i]));
+  const nose = lm?.[0];
+  const ankleMaxY = lm ? Math.max(lm[27]?.y ?? 0, lm[28]?.y ?? 0) : 0;
+
+  let body: GuideCheck;
+  if (!lm || core.some((i) => (lm[i]?.visibility ?? 0) < 0.45)) {
+    body = { key: 'body', label: '全身入镜', ok: false, detail: '未检测到完整人体，请退后让头到脚都入镜' };
+  } else if (nose && nose.y > 0.32) {
+    body = { key: 'body', label: '全身入镜', ok: false, detail: '头部太靠下，后退一步或抬高摄像头' };
+  } else if (ankleMaxY < 0.66) {
+    body = { key: 'body', label: '全身入镜', ok: false, detail: '看不到脚，后退一步直到双脚入镜' };
+  } else if (!coreOk) {
+    body = { key: 'body', label: '全身入镜', ok: false, detail: '有关键点移出画面边缘，调整站位' };
+  } else {
+    body = { key: 'body', label: '全身入镜', ok: true, detail: '头、躯干、双脚完整入镜' };
+  }
+
+  const hRatio = nose ? ankleMaxY - nose.y : 0;
+  let dist: GuideCheck;
+  if (!coreOk) dist = { key: 'dist', label: '距离适中', ok: false, detail: '待检测到人体' };
+  else if (hRatio > 0.95) dist = { key: 'dist', label: '距离适中', ok: false, detail: '离镜头太近，后退约半步' };
+  else if (hRatio < 0.55) dist = { key: 'dist', label: '距离适中', ok: false, detail: '离镜头太远，靠近一步' };
+  else dist = { key: 'dist', label: '距离适中', ok: true, detail: `人物占画面 ${Math.round(hRatio * 100)}%，距离合适` };
+
+  const hipMidX = lm ? (lm[23]!.x + lm[24]!.x) / 2 : 0.5;
+  const off = Math.abs(hipMidX - 0.5);
+  const center: GuideCheck = !coreOk
+    ? { key: 'center', label: '水平居中', ok: false, detail: '待检测到人体' }
+    : off > 0.2
+      ? { key: 'center', label: '水平居中', ok: false, detail: '偏离画面中央，往中间站一步' }
+      : { key: 'center', label: '水平居中', ok: true, detail: '位于画面中央' };
+
+  let light: GuideCheck;
+  if (luma < 0) light = { key: 'light', label: '光线充足', ok: true, detail: '无法读取画面亮度' };
+  else if (luma < 55) light = { key: 'light', label: '光线充足', ok: false, detail: '画面太暗，开灯或面向窗户（顺光）' };
+  else if (luma > 235) light = { key: 'light', label: '光线充足', ok: false, detail: '画面过曝，避免强光直射摄像头' };
+  else light = { key: 'light', label: '光线充足', ok: true, detail: `亮度 ${Math.round(luma)}，光线良好` };
+
+  const wantSide = SIDE_VIEW_EXERCISES.includes(exId);
+  const shDx = lm ? Math.abs(lm[11]!.x - lm[12]!.x) : 0;
+  let view: GuideCheck;
+  if (!coreOk) {
+    view = { key: 'view', label: '机位朝向', ok: false, soft: true, detail: wantSide ? '推荐侧对摄像头' : '推荐正对摄像头' };
+  } else if (shDx > 0.12) {
+    view = { key: 'view', label: '机位朝向', ok: !wantSide, soft: true, detail: wantSide ? '检测到正面，建议侧对镜头（关键角度更准）' : '正对镜头 ✓' };
+  } else if (shDx < 0.085) {
+    view = { key: 'view', label: '机位朝向', ok: wantSide, soft: true, detail: wantSide ? '侧面朝向 ✓' : '检测到侧面，建议正对镜头' };
+  } else {
+    view = { key: 'view', label: '机位朝向', ok: true, soft: true, detail: '斜侧 45°，可进一步调整到推荐机位' };
+  }
+
+  return [body, dist, center, light, view];
+}
+
+function sampleBrightness(video: HTMLVideoElement, canvas: HTMLCanvasElement | null): { value: number; canvas: HTMLCanvasElement | null } {
+  try {
+    const c = canvas ?? document.createElement('canvas');
+    c.width = 40; c.height = 30;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return { value: -1, canvas: c };
+    ctx.drawImage(video, 0, 0, 40, 30);
+    const d = ctx.getImageData(0, 0, 40, 30).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    return { value: sum / (d.length / 4), canvas: c };
+  } catch {
+    return { value: -1, canvas };
+  }
+}
+
+
 const exById = (id: PoseExerciseId) => POSE_EXERCISES.find((e) => e.id === id)!;
 
 // 各动作画面下方展示的实时指标（只显示与当前动作相关的，避免开合跳时一堆无关角度）
@@ -162,6 +240,15 @@ export default function PosePage() {
   // 训练前倒计时
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ---------- 摄像头站位自检向导 ----------
+  const [guide, setGuide] = useState<GuideCheck[] | null>(null);
+  const [guideBlocked, setGuideBlocked] = useState(false);
+  const guideRef = useRef<GuideCheck[] | null>(null);
+  const lastGuidePushRef = useRef(0);
+  const guideCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 课程开练（明确意图）跳过门控；用户也可手动忽略
+  const bypassGuideRef = useRef(false);
 
   // ---------- 跟练课程编排 ----------
   type StageResult = { name: string; emoji: string; value: number; unit: string; avg: number };
@@ -470,6 +557,18 @@ export default function PosePage() {
           setHud({ fps: Math.round(fpsEmaRef.current), inferMs: Math.round(inferEmaRef.current) });
         }
         const rawLm: NormalizedLandmark[] | undefined = result.landmarks?.[0];
+
+        // 站位自检向导（未开始/暂停时也持续刷新，约 2.5Hz）
+        if (now - lastGuidePushRef.current > 400) {
+          lastGuidePushRef.current = now;
+          const sampled = sampleBrightness(video, guideCanvasRef.current);
+          guideCanvasRef.current = sampled.canvas;
+          const checks = buildGuideChecks(rawLm && rawLm.length >= 29 ? rawLm : undefined, sampled.value, exerciseRef.current);
+          guideRef.current = checks;
+          setGuide(checks);
+          if (checks.every((c) => c.ok || c.soft)) setGuideBlocked(false);
+        }
+
         if (rawLm && rawLm.length >= 29) {
           // One Euro 时序滤波（静止去抖、快速动作低延迟）
           const lm = smootherRef.current.filter(rawLm as unknown as Parameters<LandmarkSmoother['filter']>[0], now) as unknown as NormalizedLandmark[];
@@ -805,6 +904,16 @@ export default function PosePage() {
       actuallyStart();
       return;
     }
+    // 站位自检门控：关键项未通过时先引导调整（课程开练/手动忽略除外）
+    if (!bypassGuideRef.current) {
+      const hardFail = guideRef.current?.find((c) => !c.ok && !c.soft);
+      if (hardFail) {
+        setGuideBlocked(true);
+        setFeedback({ text: `🧭 ${hardFail.detail}`, level: 'warn' });
+        speak(hardFail.detail);
+        return;
+      }
+    }
     setFeedback({ text: exerciseId === 'c3' ? '请侧身对镜头，前臂或直臂撑地' : '请站直，全身入镜', level: 'info' });
     let n = 3;
     setCountdown(n);
@@ -838,6 +947,8 @@ export default function PosePage() {
     setRepLog([]);
     setCountdown(null);
     startedOnceRef.current = false;
+    bypassGuideRef.current = false;
+    setGuideBlocked(false);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     counterRef.current = new RepCounter(exerciseId);
     plankRef.current.reset();
@@ -934,6 +1045,7 @@ export default function PosePage() {
 
   const beginWorkout = (plan: WorkoutPlan) => {
     if (status !== 'ready') return;
+    bypassGuideRef.current = true; // 课程为明确意图（含3-2-1调整时间），不阻断开练
     clearRestTimer();
     stageResultsRef.current = [];
     setWorkoutSummary(null);
@@ -1195,6 +1307,24 @@ export default function PosePage() {
                 </div>
               )}
 
+              {/* 站位自检状态条（未开始时底部居中提示） */}
+              {status === 'ready' && guide && !running && !startedOnceRef.current && countdown === null && restLeft === null && !workoutStage && (() => {
+                const hard = guide.filter((c) => !c.soft);
+                const fail = hard.find((c) => !c.ok);
+                if (fail) {
+                  return (
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 glass-dark text-amber-200 text-xs font-semibold px-4 py-2 rounded-full whitespace-nowrap pointer-events-none">
+                      🧭 {fail.detail}
+                    </div>
+                  );
+                }
+                return (
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-emerald-600/85 text-white text-xs font-bold px-4 py-2 rounded-full whitespace-nowrap pointer-events-none shadow-lg">
+                    ✓ 站位自检通过，点右侧「开始训练」
+                  </div>
+                );
+              })()}
+
               {/* 计次 / 计时 / 目标 */}
               {status === 'ready' && (
                 <div className="absolute bottom-4 left-4 glass-dark rounded-xl px-4 py-2 text-white min-w-[110px]">
@@ -1284,6 +1414,47 @@ export default function PosePage() {
 
         {/* ===== 右侧：控制面板 ===== */}
         <div className="space-y-4">
+          {/* 站位自检向导 */}
+          {status === 'ready' && guide && (() => {
+            const hard = guide.filter((c) => !c.soft);
+            const allPass = hard.every((c) => c.ok);
+            const passCount = hard.filter((c) => c.ok).length;
+            return (
+              <div className={`rounded-2xl shadow-sm p-5 border transition-colors ${allPass ? 'bg-emerald-50/60 border-emerald-200' : 'bg-white border-transparent'}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-bold text-gray-800">🧭 站位自检</h2>
+                  <span className={`text-[11px] font-bold ${allPass ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    {allPass ? '✓ 全部通过，可以开始' : `${passCount}/${hard.length} 项通过`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mb-3">按提示调整站位，识别会明显更准</p>
+                <ul className="space-y-2">
+                  {guide.map((c) => (
+                    <li key={c.key} className="flex items-start gap-2">
+                      <span className="mt-0.5 shrink-0">
+                        {c.ok ? <span className="text-emerald-500">✓</span> : c.soft ? <span className="text-amber-400">!</span> : <span className="text-red-400">✗</span>}
+                      </span>
+                      <div>
+                        <p className="text-xs font-bold text-gray-700 leading-4">
+                          {c.label}{c.soft && <span className="text-[9px] text-gray-400 font-normal ml-1">建议</span>}
+                        </p>
+                        <p className={`text-[10px] leading-4 ${c.ok ? 'text-gray-400' : c.soft ? 'text-amber-500' : 'text-red-500'}`}>{c.detail}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {guideBlocked && !allPass && (
+                  <button
+                    onClick={() => { bypassGuideRef.current = true; setGuideBlocked(false); handleStartPause(); }}
+                    className="mt-3 w-full py-1.5 text-[11px] font-semibold text-gray-400 hover:text-gray-600 underline underline-offset-2"
+                  >
+                    环境受限？忽略自检，直接开始
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           {/* 识别模型档位 */}
           <div className="bg-white rounded-2xl shadow-sm p-5 card-hover">
             <div className="flex items-center justify-between mb-1">
