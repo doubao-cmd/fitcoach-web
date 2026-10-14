@@ -162,6 +162,10 @@ const cases: Case[] = [
     frames: Array.from({ length: 5 }, () => [...squatRep(), ...stand(2)]).flat() },
   { name: '深蹲 S13 站直角度稳定偏低(仅152°)5个连做不卡复位', ex: 'c1', expect: 5,
     frames: Array.from({ length: 5 }, () => [...squatRep(88, 152), ...stand(10, { knee: 152 })]).flat() },
+  { name: '深蹲 S14 站直仅146-149°(旧完成阈值150漏计)，5个不漏', ex: 'c1', expect: 5,
+    frames: Array.from({ length: 5 }, () => [...squatRep(88, 146), ...stand(8, { knee: 146 })]).flat() },
+  { name: '深蹲 S15 顶点147°较快节奏(约0.3s间隔)5个不双计不漏', ex: 'c1', expect: 5,
+    frames: Array.from({ length: 5 }, () => [...squatRep(90, 147), ...stand(6, { knee: 147 })]).flat() },
 
   // ===== 俯卧撑 =====
   { name: '俯卧撑 P1 连续 10 个标准动作', ex: 'c2', expect: 10,
@@ -191,6 +195,10 @@ const cases: Case[] = [
     frames: [...jackClosed(6), ...jackOpen(40), ...jackClosed(10), ...jackOpen(10), ...jackClosed(8)] },
   { name: '开合跳 J7 落地没完全并拢(踝比1.30,旧逻辑不复位)，连续5个', ex: 'c5', expect: 5,
     frames: Array.from({ length: 5 }, () => [...jackOpen(10), ...jackClosed(4), ...jackHalf(8)]).flat() },
+  { name: '开合跳 J8 落地只到1.30从不<1.25(旧完成阈值漏计)，连续5个', ex: 'c5', expect: 5,
+    frames: Array.from({ length: 5 }, () => [...jackClosed(6), ...jackOpen(10), ...jackHalf(10)]).flat() },
+  { name: '开合跳 J9 一直站1.30从不跳开不计', ex: 'c5', expect: 0,
+    frames: [...jackHalf(30)] },
 ];
 
 // ---------- 平板支撑场景 ----------

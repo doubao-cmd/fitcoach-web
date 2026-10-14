@@ -325,7 +325,9 @@ export class RepCounter {
     this.maxDescent = Math.max(this.maxDescent, descent);
 
     // 回到站立：完成姿态必须【持续】COMPLETE_HOLD_MS，单帧毛刺不计数
-    const completionPose = knee > 150 && descent < 0.05;
+    // 完成膝角放宽到 145°（与复位口径对称）：正对镜头透视压缩、未完全锁膝时站直常仅 145~150°，
+    // 防双计仍由 COMPLETE_HOLD 持续确认 + 最低幅度门 + 重新武装保证
+    const completionPose = knee > 145 && descent < 0.08;
     if (completionPose) {
       if (!this.completeSince) this.completeSince = now;
     } else {
@@ -464,7 +466,9 @@ export class RepCounter {
   // 开合跳：并拢(closed) → 打开(open, 踝距>1.7倍髋距且双手上举) → 并拢，计 1 次
   private jumpingJack(m: FrameMetrics, now: number): CounterUpdate {
     const open = m.ankleGapRatio > 1.7 && m.armsUp;
-    const closed = m.ankleGapRatio < 1.25;
+    // 完成（并拢）阈值放宽到 1.35，与复位滞回带一致：真实落地双脚自然间距常为 1.28~1.38，
+    // <1.25 会漏计；防双计仍要求重新打开(>1.7+举手且持续)再并拢并保持 COMPLETE_HOLD_MS
+    const closed = m.ankleGapRatio < 1.35;
     if (this.state === 'closed') {
       // 重新武装（滞回）：踝距>1.45（真的跳开）才清零；其余帧（含 1.25~1.45 落地半拢
       // 缓冲带）都维持计时，满 150ms 武装；700ms 兜底：踝距<1.35 直接武装
