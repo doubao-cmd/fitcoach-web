@@ -55,6 +55,18 @@ const LIVE_METRICS: Record<PoseExerciseId, LiveMetric[]> = {
     { label: '膝关节角', view: (m) => ({ text: `${Math.round(m.kneeAngle)}°`, good: null }) },
     { label: '躯干倾斜', view: (m) => ({ text: `${Math.round(m.torsoAngle)}°`, good: m.torsoAngle <= 20 }) },
   ],
+  c4: [
+    { label: '前/深膝角', view: (m) => ({ text: `${Math.round(m.kneeAngleMin)}°`, good: m.kneeAngleMin < 115 || m.kneeAngleMin > 145 }) },
+    { label: '后腿膝角', view: (m) => ({ text: `${Math.round(m.kneeAngleMax)}°`, good: m.kneeAngleMax < 140 || m.kneeAngleMax > 145 }) },
+    { label: '步幅/腿长', view: (m) => ({ text: m.ankleSpanLeg.toFixed(2), good: m.ankleSpanLeg > 0.45 || m.ankleSpanLeg < 0.32 }) },
+    { label: '躯干倾斜', view: (m) => ({ text: `${Math.round(m.torsoAngle)}°`, good: m.torsoAngle <= 35 }) },
+  ],
+  c8: [
+    { label: '膝抬升高度', view: (m) => ({ text: `${Math.round(m.kneeLiftMax * 100)}%`, good: m.kneeLiftMax > 0.3 }) },
+    { label: '左膝', view: (m) => ({ text: `${Math.round(m.kneeLiftL * 100)}%`, good: m.kneeLiftL > 0.3 }) },
+    { label: '右膝', view: (m) => ({ text: `${Math.round(m.kneeLiftR * 100)}%`, good: m.kneeLiftR > 0.3 }) },
+    { label: '躯干倾斜', view: (m) => ({ text: `${Math.round(m.torsoAngle)}°`, good: m.torsoAngle <= 20 }) },
+  ],
   c3: [
     { label: '身体直线', view: (m) => ({ text: `${Math.round(m.bodyLine)}°`, good: m.bodyLine >= 155 }) },
     {
@@ -259,6 +271,42 @@ export default function PosePage() {
         return;
       }
 
+      // 高抬腿：在抬得更高的膝点标注抬升百分比
+      if (exerciseRef.current === 'c8') {
+        const useL = metrics.kneeLiftL >= metrics.kneeLiftR;
+        const lift = useL ? metrics.kneeLiftL : metrics.kneeLiftR;
+        const jointPx = px(useL ? LM.kneeL : LM.kneeR);
+        const text = `${Math.round(lift * 100)}%`;
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = lift > 0.3 ? 'rgba(16,185,129,0.92)' : 'rgba(245,158,11,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(jointPx.x - tw / 2 - 10, jointPx.y - 46, tw + 20, 34, 8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, jointPx.x, jointPx.y - 22);
+        return;
+      }
+
+      // 弓步蹲：在弯得更深的膝点标注前膝角
+      if (exerciseRef.current === 'c4') {
+        const sideIsDeeper = metrics.kneeAngle <= metrics.kneeAngleO;
+        const deeperKnee = sideIsDeeper
+          ? (metrics.side === 'L' ? LM.kneeL : LM.kneeR)
+          : (metrics.side === 'L' ? LM.kneeR : LM.kneeL);
+        const angle = metrics.kneeAngleMin;
+        const jointPx = px(deeperKnee);
+        const good = angle < 115 || angle > 145;
+        const text = `${Math.round(angle)}°`;
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = good ? 'rgba(16,185,129,0.92)' : 'rgba(245,158,11,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(jointPx.x - tw / 2 - 10, jointPx.y - 46, tw + 20, 34, 8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, jointPx.x, jointPx.y - 22);
+        return;
+      }
+
       const side = metrics.side === 'L'
         ? { knee: LM.kneeL, elbow: LM.elbowL, hip: LM.hipL }
         : { knee: LM.kneeR, elbow: LM.elbowR, hip: LM.hipR };
@@ -290,11 +338,18 @@ export default function PosePage() {
     c2: { lo: 60, hi: 180, thr: 105, label: '肘角°' },
     c3: { lo: 130, hi: 180, thr: 155, label: '身体直线°' },
     c5: { lo: 0.8, hi: 2.2, thr: 1.7, label: '开脚幅度×' },
+    c4: { lo: 60, hi: 180, thr: 115, label: '前膝角°' },
+    c8: { lo: 0, hi: 0.6, thr: 0.3, label: '膝抬升×' },
   };
   const pushWave = useCallback((m: FrameMetrics | null, now: number) => {
     if (!m) return;
     const id = exerciseRef.current;
-    const v = id === 'c1' ? m.kneeAngle : id === 'c2' ? m.elbowAngle : id === 'c3' ? m.bodyLine : m.ankleGapRatio;
+    const v = id === 'c1' ? m.kneeAngle
+      : id === 'c2' ? m.elbowAngle
+      : id === 'c3' ? m.bodyLine
+      : id === 'c4' ? m.kneeAngleMin
+      : id === 'c8' ? m.kneeLiftMax
+      : m.ankleGapRatio;
     const buf = waveRef.current;
     buf.push({ t: now, v });
     while (buf.length && now - buf[0].t > 10000) buf.shift();

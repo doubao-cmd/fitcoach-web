@@ -19,7 +19,7 @@ const coverGradients = [
 ];
 
 // AI 识别支持的动作 id（与 pose 页 POSE_EXERCISES 对应）
-const AI_SUPPORTED = ['c1', 'c2', 'c3', 'c5'];
+const AI_SUPPORTED = ['c1', 'c2', 'c3', 'c5', 'c4', 'c8'];
 
 // 常见错误与呼吸节奏（详情弹层用）
 const COURSE_TIPS: Record<string, { mistakes: string[]; breath: string }> = {
@@ -27,6 +27,8 @@ const COURSE_TIPS: Record<string, { mistakes: string[]; breath: string }> = {
   c2: { mistakes: ['塌腰或撅臀，核心未收紧', '手肘外展过大伤肩', '下放幅度不足', '推起时手臂没完全伸直'], breath: '下降吸气，推起呼气' },
   c3: { mistakes: ['塌腰下沉，腰椎受压', '撅臀抬髋，身体未成直线', '耸肩、头部过度仰起', '憋气导致疲劳加快'], breath: '保持均匀深呼吸，不要憋气' },
   c5: { mistakes: ['双脚开合幅度太小', '双手没有举过头顶', '落地时膝盖伸直不缓冲', '节奏忽快忽慢'], breath: '配合跳跃自然呼吸' },
+  c4: { mistakes: ['步幅太小，前膝压力过大', '前膝超过脚尖或内扣', '上身前倾、含胸', '后膝没有充分下沉'], breath: '下蹲吸气，蹬起呼气' },
+  c8: { mistakes: ['膝盖抬不到腰部高度', '弯腰驼背、身体后仰借力', '落地太重、脚掌砸地', '左右节奏不均匀'], breath: '保持均匀快速呼吸，不要憋气' },
 };
 const DEFAULT_TIPS = { mistakes: ['保持核心稳定', '动作全程有控制', '出现疼痛立即停止'], breath: '发力时呼气，还原时吸气' };
 

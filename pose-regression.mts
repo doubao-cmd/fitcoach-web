@@ -16,7 +16,7 @@ const UA = 0.13;  // 上臂
 const FA = 0.13;  // 前臂
 const DT = 50;    // 20fps
 
-interface PoseOpts { tilt?: number; knee?: number; elbow?: number; extra?: number; arms?: 'up' | 'down' | 'ground'; hipDrop?: number; }
+interface PoseOpts { tilt?: number; knee?: number; kneeR?: number; elbow?: number; extra?: number; arms?: 'up' | 'down' | 'ground'; hipDrop?: number; march?: { side: -1 | 1; raise: number } }
 export type Frame = PoseOpts | null;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -27,9 +27,14 @@ export function buildLandmarks(o: PoseOpts): NormalizedLandmark[] {
   const eθ = ((o.elbow ?? 172) * Math.PI) / 180;
   const extra = o.extra ?? 0.01;
   const arms = o.arms ?? 'down';
+  const march = o.march;
+  const kL = o.knee ?? 172;
+  const kR = o.kneeR ?? o.knee ?? 172;
+  // 高抬腿时摆动腿不决定髋高，用支撑（较直）腿；其余情况双膝对称，取最大不改变旧行为
+  const supportK = march ? (march.side === -1 ? kR : kL) : Math.max(kL, kR);
 
   const ay = 2 * L;                                  // 脚踝 y（地面固定）
-  const hy = ay - 2 * L * Math.sin(kθ / 2);          // 髋 y（膝越屈越高）
+  const hy = ay - 2 * L * Math.sin((supportK * Math.PI) / 360); // 髋 y（膝越屈越高）
   const pts: Record<number, { x: number; y: number }> = {};
   const put = (i: number, x: number, y: number) => { pts[i] = { x, y }; };
 
@@ -37,14 +42,24 @@ export function buildLandmarks(o: PoseOpts): NormalizedLandmark[] {
     const tag = sx < 0 ? { hip: 23, knee: 25, ankle: 27, sh: 11, el: 13, wr: 15 }
       : { hip: 24, knee: 26, ankle: 28, sh: 12, el: 14, wr: 16 };
     const hx = sx * G / 2;
-    const ax = sx * (G / 2 + extra);
     put(tag.hip, hx, hy);
-    put(tag.ankle, ax, ay);
-    // 膝盖在髋-踝中点前方（侧面方向）弯折
-    put(tag.knee, (hx + ax) / 2 + L * Math.cos(kθ / 2), (hy + ay) / 2);
     // 肩
     const shx = hx, shy = hy - T;
     put(tag.sh, shx, shy);
+
+    if (march && march.side === sx) {
+      // 高抬腿摆动腿（正面）：膝从站立位上抬到髋高，小腿自然下垂
+      const kneeMy = hy + L * (1 - march.raise);
+      put(tag.knee, hx, kneeMy);
+      put(tag.ankle, hx, kneeMy + L * 0.95);
+    } else {
+      const kSide = ((sx < 0 ? kL : kR) * Math.PI) / 180;
+      const ax = sx * (G / 2 + extra);
+      put(tag.ankle, ax, ay);
+      // 膝盖在髋-踝中点前方（侧面方向）弯折
+      put(tag.knee, (hx + ax) / 2 + L * Math.cos(kSide / 2), (hy + ay) / 2);
+    }
+
     if (arms === 'ground') {
       // 俯卧撑：上臂指向身体前方的地面（世界 -x），屈肘时前臂折向头部（世界 -y）
       const d = Math.PI - eθ;
@@ -110,8 +125,19 @@ export const jackHalf = (n: number): Frame[] => Array.from({ length: n }, () => 
 const wobble = (n: number, lo: number, hi: number, extra: PoseOpts = {}): Frame[] =>
   Array.from({ length: n }, (_, i) => ({ ...extra, knee: i % 2 ? lo : hi }));
 
+// 弓步蹲（对称近似：双脚大幅分开 + 双膝屈，对侧面状态机等价于前/后腿弓步）
+const lungeRep = (): Frame[] => [
+  ...Array.from({ length: 8 }, (_, i) => ({ knee: lerp(172, 95, i / 7), extra: lerp(0.01, 0.09, i / 7) })),
+  { knee: 95, extra: 0.09 }, { knee: 95, extra: 0.09 },
+  ...Array.from({ length: 8 }, (_, i) => ({ knee: lerp(95, 172, i / 7), extra: lerp(0.09, 0.01, i / 7) })),
+];
+// 高抬腿：一侧膝上抬 2 帧 + 落回 1 帧（raise≈大腿抬升比例，0.78→lift≈0.39）
+const marchStep = (side: -1 | 1): Frame[] => [
+  { march: { side, raise: 0.78 } }, { march: { side, raise: 0.78 } }, {},
+];
+
 // ---------- 运行器 ----------
-function simulate(ex: 'c1' | 'c2' | 'c5', frames: Frame[]) {
+function simulate(ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8', frames: Frame[]) {
   const counter = new RepCounter(ex);
   let reps = 0;
   let lastFeedback = '';
@@ -132,7 +158,7 @@ function simulate(ex: 'c1' | 'c2' | 'c5', frames: Frame[]) {
 }
 
 // ---------- 测试用例 ----------
-interface Case { name: string; ex: 'c1' | 'c2' | 'c5'; frames: Frame[]; expect: number }
+interface Case { name: string; ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8'; frames: Frame[]; expect: number }
 const cases: Case[] = [
   // ===== 深蹲 =====
   { name: '深蹲 S1 连续 10 个标准动作', ex: 'c1', expect: 10,
@@ -199,6 +225,25 @@ const cases: Case[] = [
     frames: Array.from({ length: 5 }, () => [...jackClosed(6), ...jackOpen(10), ...jackHalf(10)]).flat() },
   { name: '开合跳 J9 一直站1.30从不跳开不计', ex: 'c5', expect: 0,
     frames: [...jackHalf(30)] },
+
+  // ===== 弓步蹲 =====
+  { name: '弓步 L1 连续5个标准(大跨步+双膝屈)', ex: 'c4', expect: 5,
+    frames: Array.from({ length: 5 }, () => [...lungeRep(), ...stand(8)]).flat() },
+  { name: '弓步 L2 只小幅屈膝120°不迈步不计', ex: 'c4', expect: 0,
+    frames: [...stand(6), ...stand(6, { knee: 120, extra: 0.04 }), ...stand(16)] },
+  { name: '弓步 L3 大步幅但腿伸直(未屈膝)不计', ex: 'c4', expect: 0,
+    frames: [...stand(6), ...stand(6, { knee: 172, extra: 0.1 }), ...stand(16)] },
+  { name: '弓步 L4 较快节奏连做5个不漏', ex: 'c4', expect: 5,
+    frames: Array.from({ length: 5 }, () => [...lungeRep(), ...stand(4)]).flat() },
+
+  // ===== 高抬腿 =====
+  { name: '高抬腿 M1 左右交替10步', ex: 'c8', expect: 10,
+    frames: Array.from({ length: 5 }, () => [...marchStep(-1), ...marchStep(1)]).flat() },
+  { name: '高抬腿 M2 一直站立不计', ex: 'c8', expect: 0, frames: stand(30) },
+  { name: '高抬腿 M3 膝抬不到位(raise0.45)不计', ex: 'c8', expect: 0,
+    frames: Array.from({ length: 10 }, () => [{ march: { side: -1, raise: 0.45 } }, { march: { side: 1, raise: 0.45 } }, {}]).flat() },
+  { name: '高抬腿 M4 同侧连续抬(每步间落回)可重复计6次', ex: 'c8', expect: 6,
+    frames: Array.from({ length: 6 }, () => marchStep(-1)).flat() },
 ];
 
 // ---------- 平板支撑场景 ----------

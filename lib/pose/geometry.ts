@@ -60,6 +60,17 @@ export interface FrameMetrics {
   legLen: number;
   /** (髋y-肩y)/腿长：平板支撑区分撅臀抬髋(负)与塌腰沉髋(正)，水平时≈0 */
   plankHipDy: number;
+  /** 另一侧膝关节角（弓步要看双膝） */
+  kneeAngleO: number;
+  /** 两侧膝角的较小/较大值（弓步：前/后膝都要弯） */
+  kneeAngleMin: number;
+  kneeAngleMax: number;
+  /** 双踝画面距离 / 腿长：弓步的前后大步幅（侧面），站立≈0.2，弓步>0.5 */
+  ankleSpanLeg: number;
+  /** 左/右膝上抬比例（高抬腿）：站立≈0，大腿抬到水平≈1，无需个人基线 */
+  kneeLiftL: number;
+  kneeLiftR: number;
+  kneeLiftMax: number;
 }
 
 export interface CounterUpdate {
@@ -127,24 +138,41 @@ function metricsOf(lm: NormalizedLandmark[]): FrameMetrics | null {
   const hipO = v(lm, side === 'L' ? LM.hipR : LM.hipL);
   const kneeO = v(lm, side === 'L' ? LM.kneeR : LM.kneeL);
   const ankleL = v(lm, LM.ankleL), ankleR = v(lm, LM.ankleR);
-  if (!shoulder || !elbow || !wrist || !hip || !knee || !ankle || !hipO || !kneeO || !ankleL || !ankleR || !shoulderO) return null;
+  const ankleO = side === 'L' ? ankleR : ankleL;
+  const kneeL = v(lm, LM.kneeL), kneeR = v(lm, LM.kneeR);
+  if (!shoulder || !elbow || !wrist || !hip || !knee || !ankle || !hipO || !kneeO || !ankleL || !ankleR || !shoulderO || !ankleO || !kneeL || !kneeR) return null;
 
   const kneeAngle = angleAt(hip, knee, ankle);
+  const kneeAngleO = angleAt(hipO, kneeO, ankleO);
   const elbowAngle = angleAt(shoulder, elbow, wrist);
 
   const hipGap = Math.max(dist2d(hip, hipO), 1e-3);
+  // 取两侧髋-踝距离的较大值为腿长（高抬腿时支撑直腿最长，最稳）
+  const legLen = Math.max(dist2d(hip, ankle), dist2d(hipO, ankleO), 1e-3);
+  const hipY = (hip.y + hipO.y) / 2;
+  // 膝上抬比例：站立时膝在髋下方约半个腿长（→0），大腿抬到水平膝近髋高（→1）
+  const liftOf = (kneeP: P) => Math.max(-0.2, Math.min(1, (hipY - kneeP.y) / legLen + 0.5));
+  const kneeLiftL = liftOf(kneeL);
+  const kneeLiftR = liftOf(kneeR);
   return {
     side,
     kneeAngle,
+    kneeAngleO,
+    kneeAngleMin: Math.min(kneeAngle, kneeAngleO),
+    kneeAngleMax: Math.max(kneeAngle, kneeAngleO),
     elbowAngle,
     torsoAngle: torsoAngle(shoulder, hip),
     bodyLine: angleAt(shoulder, hip, ankle),
     kneeGapRatio: dist2d(knee, kneeO) / hipGap,
     ankleGapRatio: dist2d(ankleL, ankleR) / hipGap,
+    ankleSpanLeg: dist2d(ankleL, ankleR) / legLen,
     armsUp: lm[LM.wristL]!.y < lm[LM.shoulderL]!.y - 0.03 && lm[LM.wristR]!.y < lm[LM.shoulderR]!.y - 0.03,
-    hipY: (hip.y + hipO.y) / 2,
-    legLen: Math.max(dist2d(hip, ankle), 1e-3),
+    hipY,
+    legLen,
     plankHipDy: (hip.y - shoulder.y) / Math.max(dist2d(hip, ankle), 1e-3),
+    kneeLiftL,
+    kneeLiftR,
+    kneeLiftMax: Math.max(kneeLiftL, kneeLiftR),
   };
 }
 
@@ -154,6 +182,8 @@ export const POSE_EXERCISES = [
   { id: 'c2', name: '俯卧撑', emoji: '💪', hint: '侧对摄像头做俯卧撑，身体保持一条直线' },
   { id: 'c3', name: '平板支撑', emoji: '🧘', hint: '侧对摄像头，前臂（或直臂）撑地，肩-髋-踝成一条直线，尽量久地保持' },
   { id: 'c5', name: '开合跳', emoji: '🤸', hint: '正对摄像头，跳开时双脚打开、双手举过头顶' },
+  { id: 'c4', name: '弓步蹲', emoji: '🦵', hint: '侧对摄像头，一腿向前迈一大步下蹲，前膝约 90°、后膝下沉，再蹬回站立' },
+  { id: 'c8', name: '高抬腿', emoji: '🏃', hint: '正对摄像头，原地交替把膝盖抬到腰部高度，手臂自然摆动，保持节奏' },
 ] as const;
 
 export type PoseExerciseId = (typeof POSE_EXERCISES)[number]['id'];
@@ -204,6 +234,13 @@ export class RepCounter {
   private rearmSince = 0;
   private openSince = 0;
   private downSince = 0;
+  // 弓步：本次动作的最大步幅
+  private maxSpan = 0;
+  // 高抬腿：左右侧是否已落回（可再次触发）、当前抬升峰值、上次计数时间
+  private kneeReadyL = true;
+  private kneeReadyR = true;
+  private peakLift = 0;
+  private lastLiftAt = -REP_COOLDOWN_MS;
 
   private exerciseId: PoseExerciseId;
 
@@ -222,6 +259,8 @@ export class RepCounter {
     this.bottomSnap = null;
     this.lastRepAt = -REP_COOLDOWN_MS; this.noPoseTicks = 0;
     this.completeSince = 0; this.rearmSince = 0; this.openSince = 0; this.downSince = 0;
+    this.maxSpan = 0; this.kneeReadyL = true; this.kneeReadyR = true;
+    this.peakLift = 0; this.lastLiftAt = -REP_COOLDOWN_MS;
   }
 
   // 长时间丢失骨架：回到复位态并解除武装，等看到完整复位姿态再重新计
@@ -233,6 +272,7 @@ export class RepCounter {
     this.minElbow = 180; this.minBodyLine = 180; this.maxDescent = 0;
     this.bottomSnap = null;
     this.completeSince = 0; this.rearmSince = 0; this.openSince = 0; this.downSince = 0;
+    this.maxSpan = 0; this.kneeReadyL = true; this.kneeReadyR = true; this.peakLift = 0;
   }
 
   update(lm: NormalizedLandmark[] | undefined, nowMs: number): CounterUpdate {
@@ -250,6 +290,8 @@ export class RepCounter {
 
     if (this.exerciseId === 'c1') return this.squat(m, knee, nowMs);
     if (this.exerciseId === 'c2') return this.pushup(m, elbow, nowMs);
+    if (this.exerciseId === 'c4') return this.lunge(m, nowMs);
+    if (this.exerciseId === 'c8') return this.highKnee(m, nowMs);
     return this.jumpingJack(m, nowMs);
   }
 
@@ -543,6 +585,148 @@ export class RepCounter {
       return { metrics: m, phase: 'rep', feedback: issues.length ? `+1 ⚠️ ${issues[0]}` : '+1 节奏很好！', feedbackLevel: issues.length ? 'warn' : 'good', rep };
     }
     return { metrics: m, phase: 'open', feedback: '并拢收回 ↓', feedbackLevel: 'info' };
+  }
+
+  // 弓步蹲（侧对镜头）：站立双脚并拢 → 一腿前迈、双膝都屈、步幅大开 → 蹬回站立，计 1 次
+  // 与深蹲的区别：弓步【双膝同时屈曲】且【双脚前后大步幅】，用双侧膝角 + 双踝跨度判定
+  private static LUNGE_SPAN_DOWN = 0.45;  // 进入：双踝跨度/腿长 > 此值
+  private static LUNGE_SPAN_UP = 0.38;   // 完成：双脚收回（站立自然站距≈0.3）
+  private static LUNGE_KMIN_DOWN = 115;  // 进入：较弯侧膝角 < 此值
+  private static LUNGE_KMAX_DOWN = 140;  // 进入：另一侧膝角也要 < 此值（双膝都屈）
+  private static LUNGE_COOLDOWN_MS = 350; // 弓步幅度大、复位武装已防双计，冷却可比深蹲短
+  private lunge(m: FrameMetrics, now: number): CounterUpdate {
+    const kmin = m.kneeAngleMin;
+    const span = m.ankleSpanLeg;
+    const downPose = kmin < RepCounter.LUNGE_KMIN_DOWN && m.kneeAngleMax < RepCounter.LUNGE_KMAX_DOWN && span > RepCounter.LUNGE_SPAN_DOWN;
+    const upPose = kmin > 145 && span < RepCounter.LUNGE_SPAN_UP;
+    if (this.state === 'top') {
+      // 重新武装（滞回，与深蹲同思路）：明确下沉才清零，否则满 200ms 武装，900ms 兜底
+      if (!this.armed) {
+        if (kmin < 125 && span > 0.42) {
+          this.rearmSince = 0;
+        } else {
+          if (!this.rearmSince) this.rearmSince = now;
+          if (now - this.rearmSince >= REARM_HOLD_MS) this.armed = true;
+        }
+        if (!this.armed && now - this.lastRepAt > REARM_FORCE_MS && kmin > 148 && span < 0.36) {
+          this.armed = true;
+          this.rearmSince = 0;
+        }
+      }
+      if (this.armed && now - this.lastRepAt > RepCounter.LUNGE_COOLDOWN_MS) {
+        if (downPose) {
+          if (!this.downSince) this.downSince = now;
+          if (now - this.downSince >= DOWN_HOLD_MS) {
+            this.state = 'bottom';
+            this.phaseStart = now;
+            this.completeSince = 0;
+            this.downSince = 0;
+            this.minPrimary = kmin;
+            this.maxTorso = m.torsoAngle;
+            this.maxSpan = span;
+          }
+        } else {
+          this.downSince = 0;
+        }
+      }
+      if (!this.armed) {
+        return { metrics: m, phase: 'top', feedback: '请先双脚并拢站直复位', feedbackLevel: 'warn' };
+      }
+      return {
+        metrics: m, phase: 'top',
+        feedback: downPose ? '下沉中…' : '准备，向前迈腿下蹲！',
+        feedbackLevel: 'info',
+      };
+    }
+
+    // bottom：采样最深位
+    if (kmin < this.minPrimary) {
+      this.minPrimary = kmin;
+      this.bottomSnap = { kneeAngle: kmin, elbowAngle: m.elbowAngle, torsoAngle: m.torsoAngle, bodyLine: m.bodyLine };
+    }
+    this.maxTorso = Math.max(this.maxTorso, m.torsoAngle);
+    this.maxSpan = Math.max(this.maxSpan, span);
+
+    // 超过 2s 未回站立（中途放弃/一直保持），作废重来
+    if (now - this.phaseStart > 2000 && !upPose) {
+      this.state = 'top';
+      this.armed = false;
+      this.rearmSince = now;
+      this.completeSince = 0;
+      this.downSince = 0;
+      return { metrics: m, phase: 'top', feedback: '请蹬回站立后再做下一个', feedbackLevel: 'warn' };
+    }
+
+    if (upPose) {
+      if (!this.completeSince) this.completeSince = now;
+    } else {
+      this.completeSince = 0;
+    }
+    if (this.completeSince && now - this.completeSince >= COMPLETE_HOLD_MS && now - this.phaseStart >= 300) {
+      // 最低幅度门：膝没怎么屈、步幅也小 → 站立调整，不计
+      if (this.minPrimary >= 125 && this.maxSpan < 0.55) {
+        this.state = 'top';
+        this.armed = false;
+        this.rearmSince = now;
+        this.completeSince = 0;
+        this.downSince = 0;
+        return { metrics: m, phase: 'top', feedback: '幅度太小未计次，迈大步下蹲', feedbackLevel: 'warn' };
+      }
+      const issues: string[] = [];
+      if (this.minPrimary > 100) issues.push('下蹲再深一些，前膝约 90°');
+      if (this.maxSpan < 0.6) issues.push('步子再迈大一点，后膝下沉');
+      if (this.maxTorso > 35) issues.push('上身保持直立，不要前倾');
+      const rep: RepResult = {
+        score: Math.max(60, 100 - issues.length * 15),
+        issues,
+        durationMs: now - this.phaseStart,
+        snap: this.bottomSnap ?? undefined,
+      };
+      this.state = 'top';
+      this.armed = false;
+      this.rearmSince = now;
+      this.completeSince = 0;
+      this.lastRepAt = now;
+      this.bottomSnap = null;
+      return { metrics: m, phase: 'rep', feedback: issues.length ? `+1 ⚠️ ${issues[0]}` : '+1 弓步标准！', feedbackLevel: issues.length ? 'warn' : 'good', rep };
+    }
+    return { metrics: m, phase: 'bottom', feedback: '蹬回站立 ↑', feedbackLevel: 'info' };
+  }
+
+  // 高抬腿（正对镜头）：原地左右交替把膝盖抬到腰部，每次膝上抬过阈值计 1 次（左右各算一次）
+  // 边沿计数：每侧抬过 KNEE_LIFT_HI 计一次，必须先落回 KNEE_LIFT_LO 才能再计，天然去抖
+  private static KNEE_LIFT_HI = 0.3;
+  private static KNEE_LIFT_LO = 0.16;
+  private static LIFT_COOLDOWN_MS = 120;
+  private highKnee(m: FrameMetrics, now: number): CounterUpdate {
+    if (m.kneeLiftL < RepCounter.KNEE_LIFT_LO) this.kneeReadyL = true;
+    if (m.kneeLiftR < RepCounter.KNEE_LIFT_LO) this.kneeReadyR = true;
+
+    let lift = -1;
+    if (this.kneeReadyL && m.kneeLiftL > RepCounter.KNEE_LIFT_HI && now - this.lastLiftAt > RepCounter.LIFT_COOLDOWN_MS) lift = m.kneeLiftL;
+    else if (this.kneeReadyR && m.kneeLiftR > RepCounter.KNEE_LIFT_HI && now - this.lastLiftAt > RepCounter.LIFT_COOLDOWN_MS) lift = m.kneeLiftR;
+
+    if (lift >= 0) {
+      // 该侧已计，落回前不再计；交替一次后 lastLiftAt 提供跨侧冷却
+      if (m.kneeLiftL >= m.kneeLiftR) this.kneeReadyL = false; else this.kneeReadyR = false;
+      this.lastLiftAt = now;
+      this.lastRepAt = now;
+      this.peakLift = lift;
+      const issues: string[] = [];
+      if (lift < 0.4) issues.push('膝盖再抬高到腰部');
+      const rep: RepResult = {
+        score: Math.max(60, Math.min(100, Math.round(70 + ((lift - 0.3) / 0.2) * 30))),
+        issues,
+        durationMs: 0,
+        snap: { kneeAngle: m.kneeAngleMin, elbowAngle: m.elbowAngle, torsoAngle: m.torsoAngle, bodyLine: m.bodyLine },
+      };
+      return { metrics: m, phase: 'up', feedback: issues.length ? `+1 ⚠️ ${issues[0]}` : '+1 抬高！', feedbackLevel: issues.length ? 'warn' : 'good', rep };
+    }
+    return {
+      metrics: m, phase: m.kneeLiftMax > RepCounter.KNEE_LIFT_LO ? 'up' : 'idle',
+      feedback: m.kneeLiftMax < RepCounter.KNEE_LIFT_LO ? '原地交替抬膝到腰部' : '保持节奏，左右交替',
+      feedbackLevel: 'info',
+    };
   }
 }
 
