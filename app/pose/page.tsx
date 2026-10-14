@@ -201,6 +201,18 @@ const LIVE_METRICS: Record<PoseExerciseId, LiveMetric[]> = {
     { label: '右膝', view: (m) => ({ text: `${Math.round(m.kneeLiftR * 100)}%`, good: m.kneeLiftR > 0.3 }) },
     { label: '躯干倾斜', view: (m) => ({ text: `${Math.round(m.torsoAngle)}°`, good: m.torsoAngle <= 20 }) },
   ],
+  c9: [
+    { label: '弯举肘角', view: (m) => ({ text: `${Math.round(m.elbowAngleMin)}°`, good: m.elbowAngleMin < 80 || m.elbowAngleMin > 150 }) },
+    { label: '另一侧肘角', view: (m) => ({ text: `${Math.round(m.elbowOther)}°`, good: null }) },
+    { label: '躯干倾斜', view: (m) => ({ text: `${Math.round(m.torsoAngle)}°`, good: m.torsoAngle <= 30 }) },
+    { label: '膝关节角', view: (m) => ({ text: `${Math.round(m.kneeAngleMin)}°`, good: m.kneeAngleMin > 155 }) },
+  ],
+  c10: [
+    { label: '大臂外展', view: (m) => ({ text: `${Math.round(m.armRaiseMax)}°`, good: m.armRaiseMax >= 72 || m.armRaiseMax < 30 }) },
+    { label: '左臂外展', view: (m) => ({ text: `${Math.round(m.armRaiseL)}°`, good: m.armRaiseL >= 72 }) },
+    { label: '右臂外展', view: (m) => ({ text: `${Math.round(m.armRaiseR)}°`, good: m.armRaiseR >= 72 }) },
+    { label: '肘角(伸直)', view: (m) => ({ text: `${Math.round(m.elbowAngleMin)}°`, good: m.elbowAngleMin >= 150 }) },
+  ],
   c3: [
     { label: '身体直线', view: (m) => ({ text: `${Math.round(m.bodyLine)}°`, good: m.bodyLine >= 155 }) },
     {
@@ -217,7 +229,7 @@ const LIVE_METRICS: Record<PoseExerciseId, LiveMetric[]> = {
 type RepLogItem = {
   n: number; time: string; exerciseId: PoseExerciseId; exerciseName: string;
   score: number; issues: string;
-  kneeAngle: number | ''; elbowAngle: number | ''; torsoAngle: number | ''; bodyLine: number | '';
+  kneeAngle: number | ''; elbowAngle: number | ''; torsoAngle: number | ''; bodyLine: number | ''; armRaise: number | '';
 };
 
 export default function PosePage() {
@@ -461,6 +473,40 @@ export default function PosePage() {
         return;
       }
 
+      // 二头弯举：在弯得更多的肘点标注较小肘角
+      if (exerciseRef.current === 'c9') {
+        const useL = metrics.elbowAngle <= metrics.elbowOther;
+        const angle = metrics.elbowAngleMin;
+        const jointPx = px(useL ? LM.elbowL : LM.elbowR);
+        const good = angle < 80 || angle > 150;
+        const text = `${Math.round(angle)}°`;
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = good ? 'rgba(16,185,129,0.92)' : 'rgba(245,158,11,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(jointPx.x - tw / 2 - 10, jointPx.y - 46, tw + 20, 34, 8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, jointPx.x, jointPx.y - 22);
+        return;
+      }
+
+      // 侧平举：在抬得更高一侧的肘点标注外展角
+      if (exerciseRef.current === 'c10') {
+        const useL = metrics.armRaiseL >= metrics.armRaiseR;
+        const angle = metrics.armRaiseMax;
+        const jointPx = px(useL ? LM.elbowL : LM.elbowR);
+        const good = angle >= 72 || angle < 30;
+        const text = `${Math.round(angle)}°`;
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = good ? 'rgba(16,185,129,0.92)' : 'rgba(245,158,11,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(jointPx.x - tw / 2 - 10, jointPx.y - 46, tw + 20, 34, 8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, jointPx.x, jointPx.y - 22);
+        return;
+      }
+
       const side = metrics.side === 'L'
         ? { knee: LM.kneeL, elbow: LM.elbowL, hip: LM.hipL }
         : { knee: LM.kneeR, elbow: LM.elbowR, hip: LM.hipR };
@@ -494,6 +540,8 @@ export default function PosePage() {
     c5: { lo: 0.8, hi: 2.2, thr: 1.7, label: '开脚幅度×' },
     c4: { lo: 60, hi: 180, thr: 115, label: '前膝角°' },
     c8: { lo: 0, hi: 0.6, thr: 0.3, label: '膝抬升×' },
+    c9: { lo: 30, hi: 180, thr: 80, label: '肘角°' },
+    c10: { lo: 0, hi: 110, thr: 72, label: '外展角°' },
   };
   const pushWave = useCallback((m: FrameMetrics | null, now: number) => {
     if (!m) return;
@@ -503,6 +551,8 @@ export default function PosePage() {
       : id === 'c3' ? m.bodyLine
       : id === 'c4' ? m.kneeAngleMin
       : id === 'c8' ? m.kneeLiftMax
+      : id === 'c9' ? m.elbowAngleMin
+      : id === 'c10' ? m.armRaiseMax
       : m.ankleGapRatio;
     const buf = waveRef.current;
     buf.push({ t: now, v });
@@ -550,6 +600,7 @@ export default function PosePage() {
         elbowAngle: Math.round(seg.snap.elbowAngle),
         torsoAngle: Math.round(seg.snap.torsoAngle),
         bodyLine: Math.round(seg.snap.bodyLine),
+        armRaise: '',
       };
       repLogRef.current = [...repLogRef.current, item];
       setRepLog(repLogRef.current);
@@ -672,6 +723,7 @@ export default function PosePage() {
                 elbowAngle: snap ? Math.round(snap.elbowAngle) : '',
                 torsoAngle: snap ? Math.round(snap.torsoAngle) : '',
                 bodyLine: snap ? Math.round(snap.bodyLine) : '',
+                armRaise: snap?.armRaise != null ? Math.round(snap.armRaise) : '',
               };
               repLogRef.current = [...repLogRef.current, item];
               setRepLog(repLogRef.current);
@@ -955,10 +1007,10 @@ export default function PosePage() {
   // 导出逐次动作 CSV（准确率实验用，UTF-8 BOM，Excel 直接打开）
   const exportRepCsv = () => {
     if (repLogRef.current.length === 0) return;
-    const header = ['序号', '时刻', '动作', '系统标准度', '系统检出问题', '膝角(°)', '肘角(°)', '躯干角(°)', '身体直线(°)'];
+    const header = ['序号', '时刻', '动作', '系统标准度', '系统检出问题', '膝角(°)', '肘角(°)', '躯干角(°)', '身体直线(°)', '大臂外展(°)'];
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
     const rows = repLogRef.current.map((r) =>
-      [r.n, r.time, r.exerciseName, r.score, r.issues || '标准', r.kneeAngle, r.elbowAngle, r.torsoAngle, r.bodyLine].map(esc).join(','),
+      [r.n, r.time, r.exerciseName, r.score, r.issues || '标准', r.kneeAngle, r.elbowAngle, r.torsoAngle, r.bodyLine, r.armRaise].map(esc).join(','),
     );
     const csv = '﻿' + [header.map(esc).join(','), ...rows].join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -1457,7 +1509,7 @@ export default function PosePage() {
                       <h2 className="text-white text-lg font-bold relative z-10">浏览器端实时 AI 私教</h2>
                       <p className="text-blue-100/90 text-xs mt-2 max-w-sm relative z-10 leading-5">
                         调用摄像头后，MediaPipe Pose 在本机推理出 33 个人体关键点，
-                        通过关节角度算法实时判断深蹲 / 俯卧撑 / 平板支撑 / 开合跳的动作质量，自动计次或计时。
+                        通过关节角度算法实时判断深蹲 / 俯卧撑 / 平板支撑 / 开合跳 / 弓步蹲 / 高抬腿 / 弯举 / 侧平举的动作质量，自动计次或计时。
                       </p>
                       <button
                         onClick={startCamera}

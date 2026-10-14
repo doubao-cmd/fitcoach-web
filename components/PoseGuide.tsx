@@ -115,6 +115,34 @@ const POSES: Record<PoseExerciseId, { start?: Stick; end: Stick; endLabel: strin
     },
     endLabel: '膝盖抬到腰部高度',
   },
+  c9: {
+    start: {
+      head: [60, 14], shoulder: [60, 24], hip: [60, 48],
+      elbowL: [55, 36], wristL: [55, 48], elbowR: [65, 36], wristR: [65, 48],
+      kneeL: [60, 64], ankleL: [58, 80], kneeR: [60, 64], ankleR: [62, 80],
+    },
+    end: {
+      head: [60, 14], shoulder: [60, 24], hip: [60, 48],
+      // 屈肘把前臂举到肩前，大臂不动
+      elbowL: [55, 36], wristL: [53, 24], elbowR: [65, 36], wristR: [67, 24],
+      kneeL: [60, 64], ankleL: [58, 80], kneeR: [60, 64], ankleR: [62, 80],
+    },
+    endLabel: '屈肘举到肩前',
+  },
+  c10: {
+    start: {
+      head: [60, 14], shoulder: [60, 24], hip: [60, 48],
+      elbowL: [55, 36], wristL: [55, 48], elbowR: [65, 36], wristR: [65, 48],
+      kneeL: [60, 64], ankleL: [58, 80], kneeR: [60, 64], ankleR: [62, 80],
+    },
+    end: {
+      head: [60, 14], shoulder: [60, 24], hip: [60, 48],
+      // 双臂向两侧抬到水平，手肘不弯
+      elbowL: [43, 24], wristL: [29, 24], elbowR: [77, 24], wristR: [91, 24],
+      kneeL: [60, 64], ankleL: [58, 80], kneeR: [60, 64], ankleR: [62, 80],
+    },
+    endLabel: '大臂与地面平行',
+  },
 };
 
 const STEPS: Record<PoseExerciseId, string[]> = {
@@ -124,6 +152,8 @@ const STEPS: Record<PoseExerciseId, string[]> = {
   c5: ['双脚并拢、双手放体侧站立', '跳起双脚打开同时双手上举过头', '轻落地缓冲，跳回并拢姿势'],
   c4: ['站直，一腿向前迈一大步', '下蹲至前膝约 90°、后膝接近地面', '上身直立，前脚跟发力蹬回站立'],
   c8: ['身体直立、核心微收，原地站立', '左右交替把膝盖抬到腰部高度', '手臂自然前后摆动，前脚掌柔和落地'],
+  c9: ['大臂贴紧身体两侧，不要前后晃动', '屈肘把重量举到肩前，顶峰收缩', '控制速度下放，手臂接近伸直但不锁死'],
+  c10: ['双手持重量放于体侧，手臂伸直', '向两侧抬臂至大臂与地面平行', '缓慢放回，全程不要耸肩或弯肘借力'],
 };
 
 export default function PoseGuide({ exerciseId }: { exerciseId: PoseExerciseId }) {

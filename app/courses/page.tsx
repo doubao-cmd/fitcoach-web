@@ -19,7 +19,7 @@ const coverGradients = [
 ];
 
 // AI 识别支持的动作 id（与 pose 页 POSE_EXERCISES 对应）
-const AI_SUPPORTED = ['c1', 'c2', 'c3', 'c5', 'c4', 'c8'];
+const AI_SUPPORTED = ['c1', 'c2', 'c3', 'c5', 'c4', 'c8', 'c9', 'c10'];
 
 // 常见错误与呼吸节奏（详情弹层用）
 const COURSE_TIPS: Record<string, { mistakes: string[]; breath: string }> = {
@@ -29,6 +29,8 @@ const COURSE_TIPS: Record<string, { mistakes: string[]; breath: string }> = {
   c5: { mistakes: ['双脚开合幅度太小', '双手没有举过头顶', '落地时膝盖伸直不缓冲', '节奏忽快忽慢'], breath: '配合跳跃自然呼吸' },
   c4: { mistakes: ['步幅太小，前膝压力过大', '前膝超过脚尖或内扣', '上身前倾、含胸', '后膝没有充分下沉'], breath: '下蹲吸气，蹬起呼气' },
   c8: { mistakes: ['膝盖抬不到腰部高度', '弯腰驼背、身体后仰借力', '落地太重、脚掌砸地', '左右节奏不均匀'], breath: '保持均匀快速呼吸，不要憋气' },
+  c9: { mistakes: ['大臂离开身体、肘部前后晃动', '借身体摆动甩起重量', '下放时没有控制、直接坠臂', '弯举不到位，前臂未到垂直以上'], breath: '举起呼气，下放吸气' },
+  c10: { mistakes: ['抬臂时耸肩、斜方肌代偿', '肘关节弯曲借力', '抬得过高超过肩部', '躯干侧倾、腰部反弓借力'], breath: '上抬呼气，还原吸气' },
 };
 const DEFAULT_TIPS = { mistakes: ['保持核心稳定', '动作全程有控制', '出现疼痛立即停止'], breath: '发力时呼气，还原时吸气' };
 

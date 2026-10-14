@@ -156,6 +156,8 @@ export const courses: Course[] = [
   { id: 'c6', name: '波比跳', emoji: '🔥', difficulty: '困难', duration: 180, calories: 90, targetMuscles: ['全身', '心肺', '爆发力'], points: ['从站立到俯卧撑到跳跃', '每个动作衔接流畅', '保持核心收紧', '初学者可简化'], icon: '🔥' },
   { id: 'c7', name: '仰卧起坐', emoji: '🛏️', difficulty: '入门', duration: 180, calories: 55, targetMuscles: ['腹肌', '髂腰肌'], points: ['双手交叉胸前或耳边', '用腹部力量起身', '下背部不离地面', '不要用脖子发力'], icon: '🛏️' },
   { id: 'c8', name: '高抬腿', emoji: '🏃', difficulty: '入门', duration: 120, calories: 40, targetMuscles: ['股四头肌', '髋部', '心肺'], points: ['膝盖抬至腰部高度', '手臂自然摆动', '保持快速节奏', '身体微微前倾'], icon: '🏃' },
+  { id: 'c9', name: '二头弯举', emoji: '🦾', difficulty: '入门', duration: 240, calories: 50, targetMuscles: ['二头肌', '前臂'], points: ['大臂贴紧身体固定', '屈肘把重量举到肩前', '控制速度下放', '身体不摆动借力'], icon: '🦾' },
+  { id: 'c10', name: '侧平举', emoji: '🙆', difficulty: '进阶', duration: 240, calories: 45, targetMuscles: ['三角肌', '肩膀'], points: ['手臂伸直向两侧抬起', '大臂抬到与地面平行', '不要耸肩或弯肘借力', '缓慢放回体侧'], icon: '🙆' },
 ];
 
 // ============ 训练记录（最新 30 条） ============

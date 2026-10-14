@@ -16,7 +16,7 @@ const UA = 0.13;  // 上臂
 const FA = 0.13;  // 前臂
 const DT = 50;    // 20fps
 
-interface PoseOpts { tilt?: number; knee?: number; kneeR?: number; elbow?: number; extra?: number; arms?: 'up' | 'down' | 'ground'; hipDrop?: number; march?: { side: -1 | 1; raise: number } }
+interface PoseOpts { tilt?: number; knee?: number; kneeR?: number; elbow?: number; extra?: number; arms?: 'up' | 'down' | 'ground' | 'curl' | 'raise'; hipDrop?: number; march?: { side: -1 | 1; raise: number }; curl?: number; curlR?: number; abduction?: number; abductionR?: number }
 export type Frame = PoseOpts | null;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -60,6 +60,9 @@ export function buildLandmarks(o: PoseOpts): NormalizedLandmark[] {
       put(tag.knee, (hx + ax) / 2 + L * Math.cos(kSide / 2), (hy + ay) / 2);
     }
 
+    // 上肢专用：弯举屈肘角（左/右可不同，支持单臂交替）、侧平举外展角
+    const cθ = ((sx < 0 ? (o.curl ?? 172) : (o.curlR ?? o.curl ?? 172)) * Math.PI) / 180;
+    const aθ = ((sx < 0 ? (o.abduction ?? 0) : (o.abductionR ?? o.abduction ?? 0)) * Math.PI) / 180;
     if (arms === 'ground') {
       // 俯卧撑：上臂指向身体前方的地面（世界 -x），屈肘时前臂折向头部（世界 -y）
       const d = Math.PI - eθ;
@@ -68,6 +71,16 @@ export function buildLandmarks(o: PoseOpts): NormalizedLandmark[] {
     } else if (arms === 'up') {
       put(tag.el, shx, shy - UA);
       put(tag.wr, shx, shy - UA - FA);
+    } else if (arms === 'curl') {
+      // 二头弯举：大臂垂直向下不动，前臂向肩前折起（α=π-肘角）
+      const alpha = Math.PI - cθ;
+      put(tag.el, shx, shy + UA);
+      put(tag.wr, shx + sx * FA * Math.sin(alpha), shy + UA + FA * Math.cos(alpha));
+    } else if (arms === 'raise') {
+      // 侧平举：大臂向两侧外展 aθ，前臂与大臂成直线（肘≈180°）
+      const ex = shx + sx * UA * Math.sin(aθ), ey = shy + UA * Math.cos(aθ);
+      put(tag.el, ex, ey);
+      put(tag.wr, ex + sx * FA * Math.sin(aθ), ey + FA * Math.cos(aθ));
     } else {
       put(tag.el, shx, shy + UA);
       put(tag.wr, shx, shy + UA + FA);
@@ -135,9 +148,25 @@ const lungeRep = (): Frame[] => [
 const marchStep = (side: -1 | 1): Frame[] => [
   { march: { side, raise: 0.78 } }, { march: { side, raise: 0.78 } }, {},
 ];
+// 二头弯举（双臂）：屈肘 172→depth→172；oneArm 时右臂保持伸直模拟单臂弯举
+const curlRep = (depth = 50, oneArm = false): Frame[] => [
+  ...Array.from({ length: 10 }, (_, i) => ({ arms: 'curl' as const, curl: lerp(172, depth, i / 9), ...(oneArm ? { curlR: 172 } : {}) })),
+  { arms: 'curl', curl: depth, ...(oneArm ? { curlR: 172 } : {}) },
+  { arms: 'curl', curl: depth, ...(oneArm ? { curlR: 172 } : {}) },
+  ...Array.from({ length: 10 }, (_, i) => ({ arms: 'curl' as const, curl: lerp(depth, 172, i / 9), ...(oneArm ? { curlR: 172 } : {}) })),
+];
+const curlDown = (n: number, angle: number, oneArm = false): Frame[] =>
+  Array.from({ length: n }, () => ({ arms: 'curl' as const, curl: angle, ...(oneArm ? { curlR: 172 } : {}) }));
+// 侧平举：外展 0→hi→0
+const raiseRep = (hi = 85): Frame[] => [
+  ...Array.from({ length: 10 }, (_, i) => ({ arms: 'raise' as const, abduction: lerp(0, hi, i / 9) })),
+  { arms: 'raise', abduction: hi }, { arms: 'raise', abduction: hi },
+  ...Array.from({ length: 10 }, (_, i) => ({ arms: 'raise' as const, abduction: lerp(hi, 0, i / 9) })),
+];
+const raiseHold = (n: number, a: number): Frame[] => Array.from({ length: n }, () => ({ arms: 'raise' as const, abduction: a }));
 
 // ---------- 运行器 ----------
-function simulate(ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8', frames: Frame[]) {
+function simulate(ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8' | 'c9' | 'c10', frames: Frame[]) {
   const counter = new RepCounter(ex);
   let reps = 0;
   let lastFeedback = '';
@@ -158,7 +187,7 @@ function simulate(ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8', frames: Frame[]) {
 }
 
 // ---------- 测试用例 ----------
-interface Case { name: string; ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8'; frames: Frame[]; expect: number }
+interface Case { name: string; ex: 'c1' | 'c2' | 'c4' | 'c5' | 'c8' | 'c9' | 'c10'; frames: Frame[]; expect: number }
 const cases: Case[] = [
   // ===== 深蹲 =====
   { name: '深蹲 S1 连续 10 个标准动作', ex: 'c1', expect: 10,
@@ -244,6 +273,44 @@ const cases: Case[] = [
     frames: Array.from({ length: 10 }, () => [{ march: { side: -1, raise: 0.45 } }, { march: { side: 1, raise: 0.45 } }, {}]).flat() },
   { name: '高抬腿 M4 同侧连续抬(每步间落回)可重复计6次', ex: 'c8', expect: 6,
     frames: Array.from({ length: 6 }, () => marchStep(-1)).flat() },
+
+  // ===== 二头弯举 =====
+  { name: '弯举 U1 连续10个标准双臂弯举', ex: 'c9', expect: 10,
+    frames: Array.from({ length: 10 }, () => [...curlRep(), ...stand(8)]).flat() },
+  { name: '弯举 U2 直臂顶点单帧屈肘毛刺(75°×1帧)不计', ex: 'c9', expect: 0,
+    frames: [...stand(6), { arms: 'curl', curl: 75 }, ...stand(16)] },
+  { name: '弯举 U3 短暂屈肘(90°×6帧)未过进入阈值不计', ex: 'c9', expect: 0,
+    frames: [...stand(6), ...curlDown(6, 90), ...stand(14)] },
+  { name: '弯举 U4 擦阈值浅屈(77°到底再伸直)被幅度门中止不计', ex: 'c9', expect: 0,
+    frames: [...stand(6), ...curlDown(6, 77), ...stand(16)] },
+  { name: '弯举 U5 半程弯举(屈到70°)仍计次，连续3个', ex: 'c9', expect: 3,
+    frames: Array.from({ length: 3 }, () => [...curlRep(70), ...stand(8)]).flat() },
+  { name: '弯举 U6 快速连做8个(约1.3s/个)不漏计', ex: 'c9', expect: 8,
+    frames: Array.from({ length: 8 }, () => [...curlRep(), ...stand(4)]).flat() },
+  { name: '弯举 U7 单臂弯举5次(另一臂始终伸直)按较弯侧计数', ex: 'c9', expect: 5,
+    frames: Array.from({ length: 5 }, () => [...curlRep(50, true), ...stand(8)]).flat() },
+  { name: '弯举 U8 计次后顶点肘角余动(150-160抖动1s)不双计', ex: 'c9', expect: 1,
+    frames: [...curlRep(), ...stand(6), ...Array.from({ length: 20 }, (_, i) => ({ arms: 'curl' as const, curl: i % 2 ? 150 : 160 }))] },
+  { name: '弯举 U9 屈肘举着2s不下放→作废，随后正常1个=1', ex: 'c9', expect: 1,
+    frames: [...stand(6), ...curlDown(44, 50), ...stand(8), ...curlRep(), ...stand(8)] },
+
+  // ===== 侧平举 =====
+  { name: '侧平举 R1 连续10个标准动作', ex: 'c10', expect: 10,
+    frames: Array.from({ length: 10 }, () => [...raiseRep(), ...stand(8)]).flat() },
+  { name: '侧平举 R2 只小幅抬到40°(未过进入阈值)不计', ex: 'c10', expect: 0,
+    frames: [...stand(6), ...raiseHold(10, 40), ...stand(14)] },
+  { name: '侧平举 R3 抬到57°擦阈值(进入但未过60°幅度门)不计', ex: 'c10', expect: 0,
+    frames: [...stand(6), ...raiseRep(57), ...stand(10)] },
+  { name: '侧平举 R4 单帧抬升毛刺(80°×1帧)不计', ex: 'c10', expect: 0,
+    frames: [...stand(6), { arms: 'raise', abduction: 80 }, ...stand(16)] },
+  { name: '侧平举 R5 半程抬到65°(计入但提示不到位)连续3个', ex: 'c10', expect: 3,
+    frames: Array.from({ length: 3 }, () => [...raiseRep(65), ...stand(8)]).flat() },
+  { name: '侧平举 R6 快速连做8个不漏计', ex: 'c10', expect: 8,
+    frames: Array.from({ length: 8 }, () => [...raiseRep(), ...stand(4)]).flat() },
+  { name: '侧平举 R7 计次后顶点手臂余动(20-30°抖动1s)不双计', ex: 'c10', expect: 1,
+    frames: [...raiseRep(), ...stand(6), ...Array.from({ length: 20 }, (_, i) => ({ arms: 'raise' as const, abduction: i % 2 ? 20 : 30 }))] },
+  { name: '侧平举 R8 抬到水平保持2s不放→作废不计', ex: 'c10', expect: 0,
+    frames: [...stand(6), ...raiseHold(44, 85), ...stand(10)] },
 ];
 
 // ---------- 平板支撑场景 ----------

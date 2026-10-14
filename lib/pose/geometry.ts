@@ -26,6 +26,8 @@ export interface AngleSnapshot {
   elbowAngle: number;
   torsoAngle: number;
   bodyLine: number;
+  /** 大臂外展角（侧平举用），其余动作无此字段 */
+  armRaise?: number;
 }
 
 export interface RepResult {
@@ -71,6 +73,13 @@ export interface FrameMetrics {
   kneeLiftL: number;
   kneeLiftR: number;
   kneeLiftMax: number;
+  /** 另一侧肘关节角（弯举可取双臂较小值，支持双臂/交替弯举） */
+  elbowOther: number;
+  elbowAngleMin: number;
+  /** 左/右大臂外展角（侧平举，正面）：手臂下垂≈0，平举≈90，上举≈160 */
+  armRaiseL: number;
+  armRaiseR: number;
+  armRaiseMax: number;
 }
 
 export interface CounterUpdate {
@@ -117,6 +126,17 @@ export function torsoAngle(shoulder: P, hip: P): number {
   return (Math.acos(Math.max(-1, Math.min(1, dot / m))) * 180) / Math.PI;
 }
 
+/** 大臂外展角（冠状面 2D）：肩→髋方向与肩→肘方向的夹角，手臂下垂≈0、平举≈90 */
+function abductionAngle(shoulder: P, elbow: P, hip: P): number {
+  const down = { x: hip.x - shoulder.x, y: hip.y - shoulder.y };
+  const arm = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y };
+  const md = Math.hypot(down.x, down.y);
+  const ma = Math.hypot(arm.x, arm.y);
+  if (md < 1e-6 || ma < 1e-6) return 0;
+  const cos = (down.x * arm.x + down.y * arm.y) / (md * ma);
+  return (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
+}
+
 // ---------- 选边：取可见度更高的一侧 ----------
 function pickSide(lm: NormalizedLandmark[]): Side {
   const idxL = [LM.shoulderL, LM.elbowL, LM.wristL, LM.hipL, LM.kneeL, LM.ankleL];
@@ -135,16 +155,24 @@ function metricsOf(lm: NormalizedLandmark[]): FrameMetrics | null {
   const shoulder = v(lm, s.shoulder), elbow = v(lm, s.elbow), wrist = v(lm, s.wrist);
   const hip = v(lm, s.hip), knee = v(lm, s.knee), ankle = v(lm, s.ankle);
   const shoulderO = v(lm, side === 'L' ? LM.shoulderR : LM.shoulderL);
+  const elbowO = v(lm, side === 'L' ? LM.elbowR : LM.elbowL);
+  const wristO = v(lm, side === 'L' ? LM.wristR : LM.wristL);
   const hipO = v(lm, side === 'L' ? LM.hipR : LM.hipL);
   const kneeO = v(lm, side === 'L' ? LM.kneeR : LM.kneeL);
   const ankleL = v(lm, LM.ankleL), ankleR = v(lm, LM.ankleR);
   const ankleO = side === 'L' ? ankleR : ankleL;
   const kneeL = v(lm, LM.kneeL), kneeR = v(lm, LM.kneeR);
-  if (!shoulder || !elbow || !wrist || !hip || !knee || !ankle || !hipO || !kneeO || !ankleL || !ankleR || !shoulderO || !ankleO || !kneeL || !kneeR) return null;
+  const shoulderL = v(lm, LM.shoulderL), shoulderR = v(lm, LM.shoulderR);
+  const elbowL = v(lm, LM.elbowL), elbowR = v(lm, LM.elbowR);
+  if (!shoulder || !elbow || !wrist || !hip || !knee || !ankle || !hipO || !kneeO || !ankleL || !ankleR || !shoulderO || !ankleO || !kneeL || !kneeR || !elbowO || !wristO || !shoulderL || !shoulderR || !elbowL || !elbowR) return null;
 
   const kneeAngle = angleAt(hip, knee, ankle);
   const kneeAngleO = angleAt(hipO, kneeO, ankleO);
   const elbowAngle = angleAt(shoulder, elbow, wrist);
+  const elbowOther = angleAt(shoulderO, elbowO, wristO);
+  // 侧平举外展角（两侧分别计算，正面冠状面）
+  const armRaiseL = abductionAngle(shoulderL, elbowL, v(lm, LM.hipL)!);
+  const armRaiseR = abductionAngle(shoulderR, elbowR, v(lm, LM.hipR)!);
 
   const hipGap = Math.max(dist2d(hip, hipO), 1e-3);
   // 取两侧髋-踝距离的较大值为腿长（高抬腿时支撑直腿最长，最稳）
@@ -173,6 +201,11 @@ function metricsOf(lm: NormalizedLandmark[]): FrameMetrics | null {
     kneeLiftL,
     kneeLiftR,
     kneeLiftMax: Math.max(kneeLiftL, kneeLiftR),
+    elbowOther,
+    elbowAngleMin: Math.min(elbowAngle, elbowOther),
+    armRaiseL,
+    armRaiseR,
+    armRaiseMax: Math.max(armRaiseL, armRaiseR),
   };
 }
 
@@ -184,6 +217,8 @@ export const POSE_EXERCISES = [
   { id: 'c5', name: '开合跳', emoji: '🤸', hint: '正对摄像头，跳开时双脚打开、双手举过头顶' },
   { id: 'c4', name: '弓步蹲', emoji: '🦵', hint: '侧对摄像头，一腿向前迈一大步下蹲，前膝约 90°、后膝下沉，再蹬回站立' },
   { id: 'c8', name: '高抬腿', emoji: '🏃', hint: '正对摄像头，原地交替把膝盖抬到腰部高度，手臂自然摆动，保持节奏' },
+  { id: 'c9', name: '二头弯举', emoji: '🦾', hint: '正对或侧对摄像头均可，大臂贴紧身体，屈肘把哑铃举到肩前，再控制下放' },
+  { id: 'c10', name: '侧平举', emoji: '🙆', hint: '正对摄像头，双臂伸直向两侧抬起到大臂与地面平行，再缓慢放回体侧' },
 ] as const;
 
 export type PoseExerciseId = (typeof POSE_EXERCISES)[number]['id'];
@@ -241,6 +276,9 @@ export class RepCounter {
   private kneeReadyR = true;
   private peakLift = 0;
   private lastLiftAt = -REP_COOLDOWN_MS;
+  // 侧平举：本次动作最大外展角、抬臂阶段最小肘角（查弯肘借力）
+  private maxRaise = 0;
+  private minRaiseElbow = 180;
 
   private exerciseId: PoseExerciseId;
 
@@ -261,6 +299,7 @@ export class RepCounter {
     this.completeSince = 0; this.rearmSince = 0; this.openSince = 0; this.downSince = 0;
     this.maxSpan = 0; this.kneeReadyL = true; this.kneeReadyR = true;
     this.peakLift = 0; this.lastLiftAt = -REP_COOLDOWN_MS;
+    this.maxRaise = 0; this.minRaiseElbow = 180;
   }
 
   // 长时间丢失骨架：回到复位态并解除武装，等看到完整复位姿态再重新计
@@ -273,6 +312,7 @@ export class RepCounter {
     this.bottomSnap = null;
     this.completeSince = 0; this.rearmSince = 0; this.openSince = 0; this.downSince = 0;
     this.maxSpan = 0; this.kneeReadyL = true; this.kneeReadyR = true; this.peakLift = 0;
+    this.maxRaise = 0; this.minRaiseElbow = 180;
   }
 
   update(lm: NormalizedLandmark[] | undefined, nowMs: number): CounterUpdate {
@@ -292,6 +332,8 @@ export class RepCounter {
     if (this.exerciseId === 'c2') return this.pushup(m, elbow, nowMs);
     if (this.exerciseId === 'c4') return this.lunge(m, nowMs);
     if (this.exerciseId === 'c8') return this.highKnee(m, nowMs);
+    if (this.exerciseId === 'c9') return this.bicepCurl(m, nowMs);
+    if (this.exerciseId === 'c10') return this.lateralRaise(m, nowMs);
     return this.jumpingJack(m, nowMs);
   }
 
@@ -726,6 +768,216 @@ export class RepCounter {
       metrics: m, phase: m.kneeLiftMax > RepCounter.KNEE_LIFT_LO ? 'up' : 'idle',
       feedback: m.kneeLiftMax < RepCounter.KNEE_LIFT_LO ? '原地交替抬膝到腰部' : '保持节奏，左右交替',
       feedbackLevel: 'info',
+    };
+  }
+
+  // 二头弯举（正/侧对均可）：手臂伸直(双臂较小肘角>148) → 屈肘上举(<80) → 下放伸直，计 1 次
+  // 用双臂肘角的较小值判定，双臂同步或单臂交替弯举都能计数；防抖结构与深蹲一致
+  private static CURL_DOWN = 80;    // 进入：较弯侧肘角 < 此值
+  private static CURL_UP = 148;     // 完成：肘角 > 此值（自然微屈 148~155 也认可）
+  private bicepCurl(m: FrameMetrics, now: number): CounterUpdate {
+    const flex = m.elbowAngleMin;
+    if (this.state === 'top') {
+      // 重新武装（滞回）：再次屈肘（<85）才清零；其余帧维持计时满 200ms 武装，900ms 兜底
+      if (!this.armed) {
+        if (flex < 85) {
+          this.rearmSince = 0;
+        } else {
+          if (!this.rearmSince) this.rearmSince = now;
+          if (now - this.rearmSince >= REARM_HOLD_MS) this.armed = true;
+        }
+        if (!this.armed && now - this.lastRepAt > REARM_FORCE_MS && flex > 152) {
+          this.armed = true;
+          this.rearmSince = 0;
+        }
+      }
+      if (this.armed && now - this.lastRepAt > REP_COOLDOWN_MS) {
+        if (flex < RepCounter.CURL_DOWN) {
+          if (!this.downSince) this.downSince = now;
+          if (now - this.downSince >= DOWN_HOLD_MS) {
+            this.state = 'bottom';
+            this.phaseStart = now;
+            this.completeSince = 0;
+            this.downSince = 0;
+            this.minElbow = flex; this.maxTorso = m.torsoAngle;
+            this.bottomSnap = { kneeAngle: m.kneeAngle, elbowAngle: flex, torsoAngle: m.torsoAngle, bodyLine: m.bodyLine };
+          }
+        } else {
+          this.downSince = 0;
+        }
+      }
+      if (!this.armed) {
+        return { metrics: m, phase: 'top', feedback: '请先伸直手臂复位', feedbackLevel: 'warn' };
+      }
+      return {
+        metrics: m, phase: 'top',
+        feedback: flex < 95 ? '继续屈肘上举 ↑' : '大臂贴紧身体，屈肘举起',
+        feedbackLevel: 'info',
+      };
+    }
+
+    if (flex < this.minElbow) {
+      this.minElbow = flex;
+      this.bottomSnap = { kneeAngle: m.kneeAngle, elbowAngle: flex, torsoAngle: m.torsoAngle, bodyLine: m.bodyLine };
+    }
+    this.maxTorso = Math.max(this.maxTorso, m.torsoAngle);
+
+    // 举着超过 2s 不下放（中途放弃/一直保持），作废重来
+    if (now - this.phaseStart > 2000 && flex <= RepCounter.CURL_UP) {
+      this.state = 'top';
+      this.armed = false;
+      this.rearmSince = now;
+      this.completeSince = 0;
+      this.downSince = 0;
+      this.bottomSnap = null;
+      return { metrics: m, phase: 'top', feedback: '请下放回原位后再做下一个', feedbackLevel: 'warn' };
+    }
+
+    if (flex > RepCounter.CURL_UP) {
+      if (!this.completeSince) this.completeSince = now;
+    } else {
+      this.completeSince = 0;
+    }
+    if (this.completeSince && now - this.completeSince >= COMPLETE_HOLD_MS && now - this.phaseStart >= 300) {
+      // 最低幅度门：进入（<80）但最深未到 74° 属于擦阈值浅屈，中止不计次
+      // （74° 以下才计；60~74° 计入但提示"弯举不到位"）
+      if (this.minElbow > 74) {
+        this.state = 'top';
+        this.armed = false;
+        this.rearmSince = now;
+        this.completeSince = 0;
+        this.downSince = 0;
+        this.bottomSnap = null;
+        return { metrics: m, phase: 'top', feedback: '幅度太小未计次，屈肘举到肩前', feedbackLevel: 'warn' };
+      }
+      const issues: string[] = [];
+      if (this.minElbow > 60) issues.push('弯举不到位，屈肘把重量举到肩前');
+      if (this.maxTorso > 30) issues.push('身体不要前后摆动借力');
+      const rep: RepResult = {
+        score: Math.max(60, 100 - (issues.includes('弯举不到位，屈肘把重量举到肩前') ? 22 : 0) - (issues.includes('身体不要前后摆动借力') ? 14 : 0)),
+        issues,
+        durationMs: now - this.phaseStart,
+        snap: this.bottomSnap ?? undefined,
+      };
+      this.state = 'top';
+      this.armed = false;
+      this.rearmSince = now;
+      this.completeSince = 0;
+      this.downSince = 0;
+      this.lastRepAt = now;
+      this.bottomSnap = null;
+      return { metrics: m, phase: 'rep', feedback: issues.length ? `+1 ⚠️ ${issues[0]}` : '+1 弯举标准！', feedbackLevel: issues.length ? 'warn' : 'good', rep };
+    }
+    return {
+      metrics: m, phase: 'bottom',
+      feedback: flex < 60 ? '到位，控制下放 ↓' : '再屈肘，举到肩前',
+      feedbackLevel: flex < 60 ? 'good' : 'info',
+    };
+  }
+
+  // 侧平举（正对镜头）：手臂在体侧(外展<30) → 向两侧抬到大臂水平(>55) → 放回，计 1 次
+  // 取双臂外展角的较大值；防抖结构与深蹲一致，另检测弯肘借力与躯干侧倾
+  private static RAISE_UP = 55;     // 进入：外展角 > 此值
+  private static RAISE_DOWN = 30;   // 完成：外展角 < 此值
+  private lateralRaise(m: FrameMetrics, now: number): CounterUpdate {
+    const raise = m.armRaiseMax;
+    if (this.state === 'top') {
+      // 重新武装（滞回）：再次抬臂(>48)才清零；其余帧满 200ms 武装，700ms 兜底
+      if (!this.armed) {
+        if (raise > 48) {
+          this.rearmSince = 0;
+        } else {
+          if (!this.rearmSince) this.rearmSince = now;
+          if (now - this.rearmSince >= REARM_HOLD_MS) this.armed = true;
+        }
+        if (!this.armed && now - this.lastRepAt > JACK_REARM_FORCE_MS && raise < RepCounter.RAISE_DOWN) {
+          this.armed = true;
+          this.rearmSince = 0;
+        }
+      }
+      if (this.armed && now - this.lastRepAt > REP_COOLDOWN_MS) {
+        if (raise > RepCounter.RAISE_UP) {
+          if (!this.downSince) this.downSince = now;
+          if (now - this.downSince >= DOWN_HOLD_MS) {
+            this.state = 'bottom';
+            this.phaseStart = now;
+            this.completeSince = 0;
+            this.downSince = 0;
+            this.maxRaise = raise; this.minRaiseElbow = m.elbowAngleMin; this.maxTorso = m.torsoAngle;
+            this.bottomSnap = { kneeAngle: m.kneeAngle, elbowAngle: m.elbowAngleMin, torsoAngle: m.torsoAngle, bodyLine: m.bodyLine, armRaise: raise };
+          }
+        } else {
+          this.downSince = 0;
+        }
+      }
+      if (!this.armed) {
+        return { metrics: m, phase: 'top', feedback: '请先放下手臂复位', feedbackLevel: 'warn' };
+      }
+      return {
+        metrics: m, phase: 'top',
+        feedback: raise > 40 ? '继续抬臂 ↑' : '双臂伸直，向两侧抬起',
+        feedbackLevel: 'info',
+      };
+    }
+
+    if (raise > this.maxRaise) {
+      this.maxRaise = raise;
+      this.bottomSnap = { kneeAngle: m.kneeAngle, elbowAngle: m.elbowAngleMin, torsoAngle: m.torsoAngle, bodyLine: m.bodyLine, armRaise: raise };
+    }
+    this.minRaiseElbow = Math.min(this.minRaiseElbow, m.elbowAngleMin);
+    this.maxTorso = Math.max(this.maxTorso, m.torsoAngle);
+
+    // 举着超过 2s 不放回（中途放弃/一直保持），作废重来
+    if (now - this.phaseStart > 2000 && raise >= RepCounter.RAISE_DOWN) {
+      this.state = 'top';
+      this.armed = false;
+      this.rearmSince = now;
+      this.completeSince = 0;
+      this.downSince = 0;
+      this.bottomSnap = null;
+      return { metrics: m, phase: 'top', feedback: '请放下手臂后再做下一次', feedbackLevel: 'warn' };
+    }
+
+    if (raise < RepCounter.RAISE_DOWN) {
+      if (!this.completeSince) this.completeSince = now;
+    } else {
+      this.completeSince = 0;
+    }
+    if (this.completeSince && now - this.completeSince >= COMPLETE_HOLD_MS && now - this.phaseStart >= 200) {
+      // 最低幅度门：进入（>55）但最高未到 60° 属于擦阈值摆臂，中止不计次
+      // （60° 以上才计；60~72° 计入但提示"再抬高"）
+      if (this.maxRaise < 60) {
+        this.state = 'top';
+        this.armed = false;
+        this.rearmSince = now;
+        this.completeSince = 0;
+        this.downSince = 0;
+        this.bottomSnap = null;
+        return { metrics: m, phase: 'top', feedback: '幅度太小未计次，抬到大臂与地面平行', feedbackLevel: 'warn' };
+      }
+      const issues: string[] = [];
+      if (this.maxRaise < 72) issues.push('抬臂再高一些，大臂与地面平行');
+      if (this.minRaiseElbow < 150) issues.push('手臂伸直，不要弯肘借力');
+      if (this.maxTorso > 25) issues.push('身体直立，不要侧倾借力');
+      const rep: RepResult = {
+        score: Math.max(60, 100 - (issues.includes('抬臂再高一些，大臂与地面平行') ? 18 : 0) - (issues.includes('手臂伸直，不要弯肘借力') ? 12 : 0) - (issues.includes('身体直立，不要侧倾借力') ? 10 : 0)),
+        issues,
+        durationMs: now - this.phaseStart,
+        snap: this.bottomSnap ?? undefined,
+      };
+      this.state = 'top';
+      this.armed = false;
+      this.rearmSince = now;
+      this.completeSince = 0;
+      this.downSince = 0;
+      this.lastRepAt = now;
+      this.bottomSnap = null;
+      return { metrics: m, phase: 'rep', feedback: issues.length ? `+1 ⚠️ ${issues[0]}` : '+1 平举标准！', feedbackLevel: issues.length ? 'warn' : 'good', rep };
+    }
+    return {
+      metrics: m, phase: 'bottom',
+      feedback: raise < 72 ? '再抬高，大臂接近水平' : '到位，控制下放 ↓',
+      feedbackLevel: raise < 72 ? 'info' : 'good',
     };
   }
 }
