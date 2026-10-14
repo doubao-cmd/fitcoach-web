@@ -106,6 +106,7 @@ export default function DashboardPage() {
               accept=".json,application/json"
               onChange={handleFileChange}
               className="hidden"
+              aria-label="选择手机端导出的训练数据 JSON 文件"
             />
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -119,6 +120,7 @@ export default function DashboardPage() {
                   onClick={handleRefresh}
                   className="glass w-9 h-9 rounded-lg text-white text-sm hover:bg-white/25 transition-colors"
                   title="刷新数据"
+                  aria-label="刷新导入的数据"
                 >
                   🔄
                 </button>
@@ -126,6 +128,7 @@ export default function DashboardPage() {
                   onClick={handleClear}
                   className="glass w-9 h-9 rounded-lg text-white text-sm hover:bg-red-500/40 transition-colors"
                   title="清除导入数据"
+                  aria-label="清除已导入的数据"
                 >
                   🗑️
                 </button>

@@ -69,7 +69,13 @@ export default function KnowledgePage() {
       {/* 详情弹层 */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4" onClick={() => setOpen(null)}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto animate-fade-up" onClick={(e) => e.stopPropagation()}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={open.title}
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto animate-fade-up"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="aurora px-6 py-6 text-white sticky top-0 z-10">
               <div className="flex items-center gap-3">
                 <span className="text-3xl relative z-10">{open.icon}</span>

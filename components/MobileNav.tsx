@@ -25,13 +25,14 @@ export default function MobileNav() {
         <span>🏋️</span>
         <span className="gradient-text-light">FitCoach</span>
       </div>
-      <nav className="flex gap-1 px-2 pb-2 overflow-x-auto">
+      <nav className="flex gap-1 px-2 pb-2 overflow-x-auto" aria-label="移动端主导航">
         {navItems.map((item) => {
           const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
               href={item.href}
+              aria-current={active ? 'page' : undefined}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs transition-colors ${
                 active ? 'bg-blue-600 font-semibold' : 'text-slate-300 bg-slate-800'
               }`}

@@ -28,13 +28,14 @@ export default function Sidebar() {
         </h1>
         <p className="text-xs text-slate-400 mt-1">AI 体感健身 · 教练管理后台</p>
       </div>
-      <nav className="flex-1 py-3 relative">
+      <nav className="flex-1 py-3 relative" aria-label="主导航">
         {navItems.map((item) => {
           const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
               href={item.href}
+              aria-current={active ? 'page' : undefined}
               className={`nav-link flex items-center gap-3 px-5 py-2.5 text-sm ${
                 active
                   ? 'active bg-gradient-to-r from-blue-600/90 to-indigo-600/80 font-semibold text-white shadow-lg shadow-blue-900/40'

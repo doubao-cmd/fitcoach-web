@@ -174,10 +174,15 @@ export default function CoursesPage() {
       {/* ===== 动作详情弹层 ===== */}
       {detail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4" onClick={() => setDetail(null)}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-up max-h-[90vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${detail.name}动作详情`}
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-up max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className={`bg-gradient-to-br ${coverGradients[d.courses.findIndex((x) => x.id === detail.id) % coverGradients.length]} px-6 py-8 text-center relative`}>
-              <button onClick={() => setDetail(null)} className="absolute top-3 right-4 text-2xl text-gray-500 hover:text-gray-800">×</button>
+              <button onClick={() => setDetail(null)} aria-label="关闭动作详情" className="absolute top-3 right-4 w-9 h-9 text-2xl text-gray-500 hover:text-gray-800">×</button>
               <span className="text-6xl">{detail.emoji}</span>
               <h2 className="text-xl font-black text-gray-800 mt-2">{detail.name}</h2>
               <div className="flex items-center justify-center gap-3 mt-2 text-xs text-gray-600">

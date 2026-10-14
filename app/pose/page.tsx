@@ -1285,14 +1285,17 @@ export default function PosePage() {
                 ref={videoRef}
                 playsInline
                 muted
+                aria-label="摄像头实时画面（镜像显示）"
                 className="absolute inset-0 w-full h-full object-cover -scale-x-100"
               />
-              <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
+              <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 w-full h-full object-cover" />
 
               {/* 反馈气泡（完成提示展示期间让位给中央大字） */}
               {status === 'ready' && !repToast && (
                 <div
                   key={feedback.text + repFlash}
+                  role="status"
+                  aria-live="polite"
                   className={`absolute top-4 left-1/2 -translate-x-1/2 glass-dark text-white text-sm font-semibold px-5 py-2.5 rounded-full animate-fade-up whitespace-nowrap ${
                     feedback.level === 'good' ? 'shadow-lg shadow-emerald-500/30' : feedback.level === 'warn' ? 'shadow-lg shadow-amber-500/30' : ''
                   }`}
@@ -1314,6 +1317,8 @@ export default function PosePage() {
                   onClick={toggleSound}
                   className="absolute top-4 right-4 z-10 w-10 h-10 rounded-full glass-dark text-lg flex items-center justify-center active:scale-95"
                   title={soundOn ? '关闭语音' : '开启语音'}
+                  aria-label={soundOn ? '关闭语音播报' : '开启语音播报'}
+                  aria-pressed={soundOn}
                 >
                   {soundOn ? '🔊' : '🔇'}
                 </button>
@@ -1343,7 +1348,7 @@ export default function PosePage() {
               {/* 3-2-1 倒计时 */}
               {status === 'ready' && countdown !== null && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
-                  <div className="text-center">
+                  <div className="text-center" role="status" aria-live="assertive">
                     <p className="text-white text-8xl font-black">{countdown}</p>
                     <p className="text-white/90 text-base mt-3">{isPlank ? '请侧身对镜头，前臂或直臂撑地' : '请站直，全身入镜'}</p>
                   </div>
@@ -1387,7 +1392,7 @@ export default function PosePage() {
               {/* 跟练课程：组间休息遮罩 */}
               {status === 'ready' && restLeft !== null && workoutStage && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55">
-                  <div className="bg-slate-900/90 rounded-3xl px-10 py-8 text-center text-white shadow-2xl">
+                  <div role="dialog" aria-modal="true" aria-label="组间休息倒计时" className="bg-slate-900/90 rounded-3xl px-10 py-8 text-center text-white shadow-2xl">
                     <p className="text-sm text-slate-300 font-semibold">组间休息</p>
                     <p className="text-7xl font-black tabular-nums my-2">{restLeft}</p>
                     <p className="text-sm mb-5">
@@ -1932,7 +1937,7 @@ export default function PosePage() {
                 <h2 className="text-sm font-bold text-gray-800">〰️ 实时角度波形</h2>
                 <span className="text-[10px] text-gray-400">{waveRange[exerciseId].label} · 近 10 秒 · 虚线为达标线</span>
               </div>
-              <canvas ref={waveCanvasRef} width={300} height={72} className="w-full h-[72px] rounded-lg bg-slate-50" />
+              <canvas ref={waveCanvasRef} width={300} height={72} role="img" aria-label={`近 10 秒${waveRange[exerciseId].label}实时波形，虚线为达标线`} className="w-full h-[72px] rounded-lg bg-slate-50" />
             </div>
           )}
 
@@ -1954,6 +1959,9 @@ export default function PosePage() {
       {summary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4" onClick={() => setSummary(null)}>
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="训练总结"
             className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-up"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2033,7 +2041,7 @@ export default function PosePage() {
       {/* ===== 跟练课程整套总结弹窗 ===== */}
       {workoutSummary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4" onClick={() => setWorkoutSummary(null)}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-up" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="课程完成总结" className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-up" onClick={(e) => e.stopPropagation()}>
             <div className="aurora px-6 py-7 text-center text-white">
               <p className="text-5xl mb-2 relative z-10">🏆</p>
               <h2 className="text-xl font-black relative z-10">课程完成！</h2>

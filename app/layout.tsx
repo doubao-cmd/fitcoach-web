@@ -49,8 +49,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body className="flex h-screen overflow-hidden">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:px-4 focus:py-2 focus:rounded-lg focus:bg-blue-600 focus:text-white focus:text-sm focus:font-bold focus:shadow-xl"
+        >
+          跳到主内容
+        </a>
         <Sidebar />
-        <main className="flex-1 overflow-auto bg-gray-100 dot-grid">
+        <main id="main-content" className="flex-1 overflow-auto bg-gray-100 dot-grid">
           <MobileNav />
           <ScrollProgress />
           {children}

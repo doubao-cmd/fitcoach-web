@@ -1,5 +1,7 @@
 # 🏋️ FitCoach — AI+体感的宿舍健身私教系统（Web 教练后台）
 
+[![CI](https://github.com/doubao-cmd/fitcoach-web/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/doubao-cmd/fitcoach-web/actions/workflows/ci.yml)
+
 > **在线体验**：<https://fitcoach-web-liart.vercel.app>
 >
 > 基于 **MediaPipe BlazePose 端侧姿态识别**的 AI 健身私教：浏览器本地推理 33 个人体关键点，实时完成深蹲 / 俯卧撑 / 平板支撑 / 开合跳 / 弓步蹲 / 高抬腿的自动计数（或计时）、姿态偏差纠错与评分，视频数据不出本机。配套数据大屏、动作库、训练记录、学员管理、排行榜与训练周报。
@@ -46,6 +48,9 @@
 - **ECharts**（按需动态加载）+ 自研 SVG 迷你折线/三环/雷达组件
 - **MediaPipe Tasks Vision**（`@mediapipe/tasks-vision`），模型与 WASM 全部本地托管于 `public/mediapipe/`
 - 纯前端、零后端依赖；Vercel 一键部署，推送 main 自动发布
+- GitHub Actions CI：每次推送/PR 自动跑类型检查、44 场景姿态回归与生产构建
+- 全站安全响应头：CSP（同源白名单 + WASM 最小放行）、HSTS、X-Frame-Options DENY、nosniff、Referrer-Policy、Permissions-Policy（仅允许同源摄像头）
+- 无障碍基础：跳转链接、导航 aria-current、弹窗 role="dialog"、图标按钮 aria-label、训练反馈 aria-live
 
 ## 🚀 本地开发
 
