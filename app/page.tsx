@@ -13,6 +13,7 @@ import AccuracyRadarChart from '@/components/charts/AccuracyRadarChart';
 import GoalsRings from '@/components/GoalsRings';
 import CheckinCalendar from '@/components/CheckinCalendar';
 import { getActiveData, parseMobileJson, saveImportedData, clearImportedData, loadImportedData } from '@/lib/bridge';
+import { downloadBackup, parseWebBackup, restoreWebBackup, describeBackup } from '@/lib/backup';
 
 const feedDot: Record<string, string> = {
   blue: 'bg-blue-500', green: 'bg-emerald-500', orange: 'bg-amber-500', purple: 'bg-violet-500',
@@ -39,6 +40,7 @@ export default function DashboardPage() {
   const [hasImport, setHasImport] = useState(() => !!loadImportedData());
   const [fileName, setFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   // 导入后强制刷新
   useEffect(() => {
@@ -72,6 +74,26 @@ export default function DashboardPage() {
 
   const handleRefresh = () => {
     setData(getActiveData());
+  };
+
+  // 全量备份恢复（跨电脑/浏览器迁移，整体覆盖训练记录与打卡数据）
+  const handleBackupFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const backup = parseWebBackup(await file.text());
+      const d = describeBackup(backup);
+      if (!confirm(`将用该备份覆盖本机数据：\n训练记录 ${d.sessions} 条、打卡 ${d.checkinDays} 天${d.hasPref ? '、模型偏好' : ''}\n导出时间：${backup.exportAt}\n\n确定恢复吗？`)) {
+        e.target.value = '';
+        return;
+      }
+      const n = restoreWebBackup(backup);
+      alert(`✅ 已恢复 ${n} 项数据，页面即将刷新。`);
+      window.location.reload();
+    } catch (err) {
+      alert('❌ 恢复失败：' + (err as Error).message);
+    }
+    e.target.value = '';
   };
 
   const t = data.statTrends ?? {};
@@ -108,6 +130,30 @@ export default function DashboardPage() {
               className="hidden"
               aria-label="选择手机端导出的训练数据 JSON 文件"
             />
+            <input
+              ref={backupInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleBackupFile}
+              className="hidden"
+              aria-label="选择本系统导出的备份 JSON 文件以恢复数据"
+            />
+            <button
+              onClick={downloadBackup}
+              className="glass w-9 h-9 rounded-lg text-white text-sm hover:bg-white/25 transition-colors"
+              title="备份全部数据（训练记录+打卡）为 JSON 文件"
+              aria-label="备份全部数据为 JSON 文件"
+            >
+              💾
+            </button>
+            <button
+              onClick={() => backupInputRef.current?.click()}
+              className="glass w-9 h-9 rounded-lg text-white text-sm hover:bg-white/25 transition-colors"
+              title="从备份 JSON 恢复数据（覆盖本机数据）"
+              aria-label="从备份文件恢复数据"
+            >
+              ♻️
+            </button>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-4 py-2 bg-white text-blue-700 text-sm font-semibold rounded-lg hover:bg-blue-50 hover:-translate-y-0.5 active:translate-y-0 transition-all shadow-lg shadow-blue-950/30"
